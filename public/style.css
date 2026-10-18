@@ -245,3 +245,74 @@ button:hover { background: #4a4a4a; }
   position: fixed;
   bottom: 20px;
 }
+
+/* Online modal */
+.modal-overlay {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0,0,0,0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 200;
+}
+
+.modal {
+  background: var(--panel);
+  border-radius: 12px;
+  padding: 28px 32px;
+  width: min(420px, 90vw);
+  text-align: center;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+}
+
+.modal h2 {
+  margin-top: 0;
+  margin-bottom: 20px;
+  font-size: 1.3rem;
+}
+
+.modal-close {
+  margin-top: 20px;
+}
+
+.online-form {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+}
+
+.online-form .field select {
+  width: 140px;
+}
+
+.challenge-link-row {
+  display: flex;
+  gap: 8px;
+  margin: 12px 0;
+}
+
+.challenge-link-row input {
+  flex: 1;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid #555;
+  border-radius: 6px;
+  padding: 8px;
+  font-size: 0.85rem;
+}
+
+.waiting {
+  color: var(--muted);
+  font-size: 0.9rem;
+  margin-top: 8px;
+}
+
+.modal .error {
+  color: #e74c3c;
+}
+
+.timer.low {
+  color: #e74c3c;
+}

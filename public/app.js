@@ -1,5 +1,6 @@
 import { Chess } from './chess.js';
 import { pieceSVG } from './pieces.js';
+import { OnlineGame } from './online.js';
 
 const FILES = 'abcdefgh';
 
@@ -13,6 +14,10 @@ const flipBtn = document.getElementById('flip');
 const moveLogEl = document.getElementById('movelog');
 const engineIcon = document.getElementById('engine-icon');
 const humanIcon = document.getElementById('human-icon');
+const playOnlineBtn = document.getElementById('play-online');
+const onlineModal = document.getElementById('online-modal');
+const onlineModalClose = document.getElementById('online-modal-close');
+const onlineModalContent = document.getElementById('online-modal-content');
 
 let game = new Chess();
 let humanColor = 'w';
@@ -22,6 +27,8 @@ let legalForSelected = [];
 let thinking = false;
 let moveLog = [];
 let pendingMove = null;
+let isOnline = false;
+let onlineGame = null;
 
 // Drag state
 let dragFromIdx = null;
@@ -192,14 +199,16 @@ function onPointerUp(e) {
         dragFromIdx = null;
         return;
       }
+      const uci = game.moveToUci(move);
       game._make(move);
-      moveLog.push(game.moveToUci(move));
+      moveLog.push(uci);
       updateMoveLog();
       selected = null;
       legalForSelected = [];
       pendingMove = { from: move.from, to: move.to };
       render();
-      if (game.gameStatus() === 'ongoing') engineMove();
+      if (isOnline) onlineGame.sendMove(uci);
+      else if (game.gameStatus() === 'ongoing') engineMove();
       dragFromIdx = null;
       return;
     }
@@ -228,14 +237,16 @@ function onSquareClick(idx) {
         showPromotionDialog(selected, idx, move);
         return;
       }
+      const uci = game.moveToUci(move);
       game._make(move);
-      moveLog.push(game.moveToUci(move));
+      moveLog.push(uci);
       updateMoveLog();
       selected = null;
       legalForSelected = [];
       pendingMove = { from: move.from, to: move.to };
       render();
-      if (game.gameStatus() === 'ongoing') engineMove();
+      if (isOnline) onlineGame.sendMove(uci);
+      else if (game.gameStatus() === 'ongoing') engineMove();
       return;
     }
   }
@@ -313,15 +324,17 @@ function showPromotionDialog(fromIdx, toIdx, baseMove) {
     btn.innerHTML = pieceSVG(humanColor === 'w' ? promo : promo.toLowerCase());
     btn.addEventListener('click', () => {
       const m = { ...baseMove, promo };
+      const uci = game.moveToUci(m);
       game._make(m);
-      moveLog.push(game.moveToUci(m));
+      moveLog.push(uci);
       updateMoveLog();
       selected = null;
       legalForSelected = [];
       overlay.remove();
       pendingMove = { from: m.from, to: m.to };
       render();
-      if (game.gameStatus() === 'ongoing') engineMove();
+      if (isOnline) onlineGame.sendMove(uci);
+      else if (game.gameStatus() === 'ongoing') engineMove();
     });
     overlay.appendChild(btn);
   }
@@ -352,7 +365,176 @@ function undoMove() {
   render();
 }
 
+// --- Online multiplayer ---
+
+function formatTime(ms) {
+  const total = Math.max(0, Math.ceil(ms / 1000));
+  const mins = Math.floor(total / 60);
+  const secs = total % 60;
+  return `${mins}:${secs.toString().padStart(2, '0')}`;
+}
+
+function updateOnlineTimers(event) {
+  const { timers, turn, elapsed } = event;
+  const oppColor = humanColor === 'w' ? 'b' : 'w';
+  const myTime = turn === humanColor ? timers[humanColor] - elapsed : timers[humanColor];
+  const oppTime = turn === oppColor ? timers[oppColor] - elapsed : timers[oppColor];
+  const humanTimerEl = document.getElementById('human-timer');
+  const engineTimerEl = document.getElementById('engine-timer');
+  humanTimerEl.textContent = formatTime(myTime);
+  engineTimerEl.textContent = formatTime(oppTime);
+  humanTimerEl.classList.toggle('low', myTime < 30000);
+  engineTimerEl.classList.toggle('low', oppTime < 30000);
+}
+
+function applyOpponentMove(uci) {
+  const m = game.parseUci(uci);
+  if (m) {
+    game._make(m);
+    moveLog.push(uci);
+    updateMoveLog();
+    pendingMove = { from: m.from, to: m.to };
+    render();
+  }
+}
+
+function makeOnlineCallbacks() {
+  return {
+    onStart: (data) => startOnlineGame(data),
+    onMove: (event) => {
+      // event.turn is the turn AFTER the move; if it's my turn, opponent moved
+      if (event.turn === humanColor) applyOpponentMove(event.uci);
+    },
+    onTimer: (event) => updateOnlineTimers(event),
+    onTimeout: (event) => {
+      const iWon = event.loser !== humanColor;
+      statusEl.textContent = iWon ? 'Opponent ran out of time — You win!' : 'You ran out of time — Opponent wins!';
+      statusEl.className = 'status done';
+    },
+    onOpponentLeft: () => {
+      statusEl.textContent = 'Opponent left the game';
+      statusEl.className = 'status done';
+    },
+    onDisconnect: () => {
+      statusEl.textContent = 'Connection lost';
+      statusEl.className = 'status done';
+    },
+  };
+}
+
+function startOnlineGame(data) {
+  isOnline = true;
+  game = new Chess();
+  selected = null;
+  legalForSelected = [];
+  thinking = false;
+  moveLog = [];
+  pendingMove = null;
+  humanColor = onlineGame.color;
+  flipped = humanColor === 'b';
+
+  const topName = document.querySelector('.player-bar .player-name');
+  const topElo = document.querySelector('.player-bar .player-elo');
+  if (topName) topName.textContent = 'Opponent';
+  if (topElo) topElo.textContent = '';
+
+  onlineModal.style.display = 'none';
+
+  if (engineIcon) engineIcon.innerHTML = pieceSVG(humanColor === 'w' ? 'p' : 'P');
+  if (humanIcon) humanIcon.innerHTML = pieceSVG(humanColor === 'w' ? 'P' : 'p');
+
+  document.getElementById('engine-timer').textContent = formatTime(data.timeControl || data.timers.w);
+  document.getElementById('human-timer').textContent = formatTime(data.timeControl || data.timers.w);
+
+  updateMoveLog();
+  render();
+}
+
+function showCreateChallenge() {
+  onlineModalContent.innerHTML = `
+    <div class="online-form">
+      <label class="field">Time control
+        <select id="time-control">
+          <option value="60000">1 min</option>
+          <option value="180000">3 min</option>
+          <option value="300000" selected>5 min</option>
+          <option value="600000">10 min</option>
+          <option value="900000">15 min</option>
+          <option value="1800000">30 min</option>
+        </select>
+      </label>
+      <button id="create-challenge-btn" type="button">Create Challenge</button>
+    </div>
+  `;
+  onlineModal.style.display = 'flex';
+  document.getElementById('create-challenge-btn').addEventListener('click', createChallenge);
+}
+
+async function createChallenge() {
+  const tc = parseInt(document.getElementById('time-control').value, 10);
+  onlineModalContent.innerHTML = '<p>Creating challenge...</p>';
+
+  onlineGame = new OnlineGame(makeOnlineCallbacks());
+
+  try {
+    const data = await onlineGame.createRoom(tc);
+    const link = window.location.origin + window.location.pathname + '?room=' + data.roomId;
+    onlineModalContent.innerHTML = `
+      <p>Share this link with your opponent:</p>
+      <div class="challenge-link-row">
+        <input type="text" id="challenge-link" readonly value="${link}">
+        <button id="copy-link-btn" type="button">Copy</button>
+      </div>
+      <p class="waiting">Waiting for opponent to join...</p>
+    `;
+    document.getElementById('copy-link-btn').addEventListener('click', () => {
+      const input = document.getElementById('challenge-link');
+      input.select();
+      navigator.clipboard.writeText(input.value).then(() => {
+        document.getElementById('copy-link-btn').textContent = 'Copied!';
+      });
+    });
+  } catch (e) {
+    onlineModalContent.innerHTML = `<p class="error">Error: ${e.message}</p>`;
+  }
+}
+
+async function joinChallenge(roomId) {
+  onlineGame = new OnlineGame(makeOnlineCallbacks());
+  onlineModalContent.innerHTML = '<p>Joining game...</p>';
+  onlineModal.style.display = 'flex';
+
+  try {
+    await onlineGame.joinRoom(roomId);
+  } catch (e) {
+    onlineModalContent.innerHTML = `<p class="error">Error: ${e.message}</p>`;
+  }
+}
+
+function closeOnlineModal() {
+  onlineModal.style.display = 'none';
+  if (onlineGame && !isOnline) {
+    onlineGame.leave();
+    onlineGame = null;
+  }
+}
+
 function newGame() {
+  if (isOnline && onlineGame) {
+    onlineGame.leave();
+    onlineGame = null;
+  }
+  isOnline = false;
+  const topName = document.querySelector('.player-bar .player-name');
+  const topElo = document.querySelector('.player-bar .player-elo');
+  if (topName) topName.textContent = 'Stockfish';
+  if (topElo) topElo.textContent = '(19)';
+  document.getElementById('engine-timer').innerHTML = '&#8734;';
+  document.getElementById('human-timer').innerHTML = '&#8734;';
+  if (window.location.search) {
+    window.history.replaceState({}, '', window.location.pathname);
+  }
+
   game = new Chess();
   selected = null;
   legalForSelected = [];
@@ -379,5 +561,14 @@ newGameBtn.addEventListener('click', newGame);
 undoBtn.addEventListener('click', undoMove);
 flipBtn.addEventListener('click', () => { flipped = !flipped; render(); });
 sideEl.addEventListener('change', newGame);
+playOnlineBtn.addEventListener('click', showCreateChallenge);
+onlineModalClose.addEventListener('click', closeOnlineModal);
 
-newGame();
+// Auto-join if ?room= is in the URL
+const urlParams = new URLSearchParams(window.location.search);
+const roomParam = urlParams.get('room');
+if (roomParam) {
+  joinChallenge(roomParam);
+} else {
+  newGame();
+}
