@@ -22,7 +22,7 @@ body {
 }
 
 .app {
-  width: min(560px, 96vw);
+  width: min(640px, 96vw);
   padding: 20px 12px 40px;
   display: flex;
   flex-direction: column;
@@ -37,7 +37,7 @@ h1 { margin: 0; font-size: 1.6rem; letter-spacing: 0.5px; }
   display: grid;
   grid-template-columns: repeat(8, 1fr);
   grid-template-rows: repeat(8, 1fr);
-  width: min(560px, 96vw);
+  width: min(640px, 96vw);
   aspect-ratio: 1 / 1;
   border-radius: 8px;
   overflow: hidden;
@@ -51,8 +51,6 @@ h1 { margin: 0; font-size: 1.6rem; letter-spacing: 0.5px; }
   justify-content: center;
   cursor: pointer;
   user-select: none;
-  font-size: min(7vw, 42px);
-  line-height: 1;
 }
 
 .sq.light { background: var(--light); }
@@ -72,13 +70,21 @@ h1 { margin: 0; font-size: 1.6rem; letter-spacing: 0.5px; }
   pointer-events: none;
 }
 
-.piece {
-  text-shadow: 0 1px 2px rgba(0,0,0,0.3);
-  transition: transform 0.1s;
+/* Bigger, realistic SVG pieces */
+.piece-wrap {
+  width: 90%;
+  height: 90%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  filter: drop-shadow(0 2px 3px rgba(0,0,0,0.35));
+  pointer-events: none;
 }
 
-.piece.w { color: #fff; text-shadow: 0 0 1px #000, 0 1px 2px rgba(0,0,0,0.4); }
-.piece.b { color: #1a1a1a; text-shadow: 0 1px 2px rgba(255,255,255,0.15); }
+.piece-wrap svg {
+  width: 100%;
+  height: 100%;
+}
 
 .status {
   margin-top: 14px;
@@ -157,13 +163,17 @@ button:hover { background: #3a3a44; }
 }
 
 .promo-btn {
-  font-size: 2.5rem;
-  width: 64px;
-  height: 64px;
+  width: 72px;
+  height: 72px;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 0;
+  padding: 4px;
+}
+
+.promo-btn svg {
+  width: 100%;
+  height: 100%;
 }
 
 .promo-cancel {

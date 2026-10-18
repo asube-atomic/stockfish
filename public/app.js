@@ -1,9 +1,5 @@
 import { Chess } from './chess.js';
-
-const PIECES = {
-  K: '\u2654', Q: '\u2655', R: '\u2656', B: '\u2657', N: '\u2658', P: '\u2659',
-  k: '\u265A', q: '\u265B', r: '\u265C', b: '\u265D', n: '\u265E', p: '\u265F',
-};
+import { pieceSVG } from './pieces.js';
 
 const boardEl = document.getElementById('board');
 const statusEl = document.getElementById('status');
@@ -20,6 +16,7 @@ let selected = null;
 let legalForSelected = [];
 let thinking = false;
 let moveLog = [];
+let pendingMove = null; // {from, to} — animate after next render
 
 function displayOrder() {
   const order = [];
@@ -45,15 +42,42 @@ function render() {
 
     const piece = game.board[idx];
     if (piece) {
-      const span = document.createElement('span');
-      span.className = 'piece ' + (piece === piece.toUpperCase() ? 'w' : 'b');
-      span.textContent = PIECES[piece];
-      sq.appendChild(span);
+      const wrap = document.createElement('div');
+      wrap.className = 'piece-wrap';
+      wrap.innerHTML = pieceSVG(piece);
+      sq.appendChild(wrap);
     }
     sq.addEventListener('click', () => onSquareClick(idx));
     boardEl.appendChild(sq);
   }
   updateStatus();
+
+  // Animate the pending move (slide piece from source to destination)
+  if (pendingMove) {
+    animateMove(pendingMove.from, pendingMove.to);
+    pendingMove = null;
+  }
+}
+
+function animateMove(fromIdx, toIdx) {
+  const fromSq = document.querySelector(`.sq[data-idx="${fromIdx}"]`);
+  const toSq = document.querySelector(`.sq[data-idx="${toIdx}"]`);
+  if (!fromSq || !toSq) return;
+  const wrap = toSq.querySelector('.piece-wrap');
+  if (!wrap) return;
+
+  const fr = fromSq.getBoundingClientRect();
+  const tr = toSq.getBoundingClientRect();
+  const dx = fr.left - tr.left;
+  const dy = fr.top - tr.top;
+
+  wrap.animate(
+    [
+      { transform: `translate(${dx}px, ${dy}px)` },
+      { transform: 'translate(0, 0)' },
+    ],
+    { duration: 300, easing: 'cubic-bezier(0.25,0.46,0.45,0.94)' }
+  );
 }
 
 function updateStatus() {
@@ -100,6 +124,7 @@ async function engineMove() {
         game._make(m);
         moveLog.push(data.bestmove);
         updateMoveLog();
+        pendingMove = { from: m.from, to: m.to };
       }
     }
   } catch (e) {
@@ -116,7 +141,6 @@ function onSquareClick(idx) {
 
   const piece = game.board[idx];
 
-  // If a square is selected and this is a legal target, make the move
   if (selected !== null) {
     const move = legalForSelected.find((m) => m.to === idx);
     if (move) {
@@ -129,13 +153,13 @@ function onSquareClick(idx) {
       updateMoveLog();
       selected = null;
       legalForSelected = [];
+      pendingMove = { from: move.from, to: move.to };
       render();
       if (game.gameStatus() === 'ongoing') engineMove();
       return;
     }
   }
 
-  // Select a piece of the human's color
   if (piece && (piece === piece.toUpperCase() ? 'w' : 'b') === humanColor) {
     selected = idx;
     legalForSelected = game.legalMoves().filter((m) => m.from === idx);
@@ -149,11 +173,10 @@ function onSquareClick(idx) {
 function showPromotionDialog(fromIdx, toIdx, baseMove) {
   const overlay = document.createElement('div');
   overlay.className = 'promo-overlay';
-  const choices = humanColor === 'w' ? ['Q','R','B','N'] : ['Q','R','B','N'];
-  for (const promo of choices) {
+  for (const promo of ['Q', 'R', 'B', 'N']) {
     const btn = document.createElement('button');
     btn.className = 'promo-btn';
-    btn.textContent = PIECES[humanColor === 'w' ? promo : promo.toLowerCase()];
+    btn.innerHTML = pieceSVG(humanColor === 'w' ? promo : promo.toLowerCase());
     btn.addEventListener('click', () => {
       const m = { ...baseMove, promo };
       game._make(m);
@@ -162,6 +185,7 @@ function showPromotionDialog(fromIdx, toIdx, baseMove) {
       selected = null;
       legalForSelected = [];
       overlay.remove();
+      pendingMove = { from: m.from, to: m.to };
       render();
       if (game.gameStatus() === 'ongoing') engineMove();
     });
@@ -170,7 +194,12 @@ function showPromotionDialog(fromIdx, toIdx, baseMove) {
   const cancel = document.createElement('button');
   cancel.className = 'promo-cancel';
   cancel.textContent = 'Cancel';
-  cancel.addEventListener('click', () => { overlay.remove(); selected = null; legalForSelected = []; render(); });
+  cancel.addEventListener('click', () => {
+    overlay.remove();
+    selected = null;
+    legalForSelected = [];
+    render();
+  });
   overlay.appendChild(cancel);
   document.body.appendChild(overlay);
 }
@@ -181,6 +210,7 @@ function newGame() {
   legalForSelected = [];
   thinking = false;
   moveLog = [];
+  pendingMove = null;
   humanColor = sideEl.value;
   flipped = humanColor === 'b';
   updateMoveLog();
