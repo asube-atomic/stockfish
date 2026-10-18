@@ -143,7 +143,7 @@ class Engine {
       }, timeoutMs);
 
       this.send(`position fen ${fen}`);
-      this.send(`go depth ${depth}`);
+      this.send(`go depth ${depth} movetime 1000`);
     });
   }
 
@@ -176,7 +176,7 @@ const server = http.createServer(async (req, res) => {
       }
       // Fast fixed time budget; engine searches as deep as possible (up to
       // max depth) within it, then returns the best move found so far.
-      const timeoutMs = 1000;
+      const timeoutMs = 2000; // safety net; movetime 1000 handles actual timing
       const bestmove = await engine.bestMove(fen, depth, timeoutMs);
       if (!bestmove) {
         res.writeHead(500, { 'Content-Type': 'application/json' });
