@@ -176,7 +176,7 @@ const server = http.createServer(async (req, res) => {
       }
       // Fast fixed time budget; engine searches as deep as possible (up to
       // max depth) within it, then returns the best move found so far.
-      const timeoutMs = 5000;
+      const timeoutMs = 1000;
       const bestmove = await engine.bestMove(fen, depth, timeoutMs);
       if (!bestmove) {
         res.writeHead(500, { 'Content-Type': 'application/json' });
