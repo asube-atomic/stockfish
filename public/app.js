@@ -109,13 +109,22 @@ function animateMove(fromIdx, toIdx) {
   const dx = fr.left - tr.left;
   const dy = fr.top - tr.top;
 
-  wrap.animate(
+  // Set initial position at source immediately to prevent the piece
+  // from flashing at the destination before the animation starts
+  wrap.style.transform = `translate(${dx}px, ${dy}px)`;
+
+  const anim = wrap.animate(
     [
       { transform: `translate(${dx}px, ${dy}px)` },
       { transform: 'translate(0, 0)' },
     ],
-    { duration: 300, easing: 'cubic-bezier(0.25,0.46,0.45,0.94)' }
+    { duration: 300, easing: 'cubic-bezier(0.25,0.46,0.45,0.94)', fill: 'forwards' }
   );
+
+  anim.onfinish = () => {
+    wrap.style.transform = '';
+    anim.cancel();
+  };
 }
 
 // --- Drag and drop ---
@@ -287,26 +296,71 @@ function updateMoveLog() {
   moveLogEl.scrollTop = moveLogEl.scrollHeight;
 }
 
+// Position key for repetition detection (piece placement + turn + castling + ep)
+function posKey(fen) {
+  return fen.split(' ').slice(0, 4).join(' ');
+}
+
+// Count how many times a position key has occurred in the game
+function countPosition(key) {
+  const temp = new Chess();
+  let count = 0;
+  if (posKey(temp.fen()) === key) count++;
+  for (const uci of moveLog) {
+    const m = temp.parseUci(uci);
+    if (!m) break;
+    temp._make(m);
+    if (posKey(temp.fen()) === key) count++;
+  }
+  return count;
+}
+
+async function callEngine(fen, depth, searchmoves) {
+  const resp = await fetch('/api/bestmove', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ fen, depth, searchmoves }),
+  });
+  return resp.json();
+}
+
 async function engineMove() {
   if (game.gameStatus() !== 'ongoing') return;
   thinking = true;
   updateStatus();
   try {
     const depth = parseInt(depthEl.value, 10) || 8;
-    const resp = await fetch('/api/bestmove', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ fen: game.fen(), depth }),
-    });
-    const data = await resp.json();
-    if (data.bestmove) {
-      const m = game.parseUci(data.bestmove);
-      if (m) {
-        game._make(m);
-        moveLog.push(data.bestmove);
-        updateMoveLog();
-        pendingMove = { from: m.from, to: m.to };
+    let data = await callEngine(game.fen(), depth);
+    if (!data.bestmove) return;
+
+    let bestUci = data.bestmove;
+    let m = game.parseUci(bestUci);
+    if (!m) return;
+
+    // Check if the engine's move leads to a threefold repetition
+    const tempGame = new Chess(game.fen());
+    tempGame._make(m);
+    const repCount = countPosition(posKey(tempGame.fen()));
+
+    if (repCount >= 2) {
+      // Repetition detected — request alternative excluding this move
+      const legalMoves = game.legalMoves()
+        .map((mv) => game.moveToUci(mv))
+        .filter((u) => u !== bestUci);
+      if (legalMoves.length > 0) {
+        data = await callEngine(game.fen(), depth, legalMoves);
+        if (data.bestmove) {
+          bestUci = data.bestmove;
+          m = game.parseUci(bestUci);
+        }
       }
+    }
+
+    if (m) {
+      game._make(m);
+      moveLog.push(bestUci);
+      updateMoveLog();
+      pendingMove = { from: m.from, to: m.to };
     }
   } catch (e) {
     statusEl.textContent = 'Engine error: ' + (e.message || e);

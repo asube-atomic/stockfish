@@ -119,7 +119,7 @@ class Engine {
     await new Promise((resolve) => this.readyWaiters.push(resolve));
   }
 
-  async bestMove(fen, depth, timeoutMs) {
+  async bestMove(fen, depth, timeoutMs, searchmoves) {
     await this.waitForReady();
 
     if (this.pendingResolve) {
@@ -144,7 +144,11 @@ class Engine {
       }, timeoutMs);
 
       this.send(`position fen ${fen}`);
-      this.send(`go depth ${depth} movetime 1000`);
+      if (searchmoves && searchmoves.length > 0) {
+        this.send(`go depth ${depth} movetime 1000 searchmoves ${searchmoves.join(' ')}`);
+      } else {
+        this.send(`go depth ${depth} movetime 1000`);
+      }
     });
   }
 
@@ -231,7 +235,7 @@ const server = http.createServer(async (req, res) => {
       // Fast fixed time budget; engine searches as deep as possible (up to
       // max depth) within it, then returns the best move found so far.
       const timeoutMs = 2000; // safety net; movetime 1000 handles actual timing
-      const bestmove = await engine.bestMove(fen, depth, timeoutMs);
+      const bestmove = await engine.bestMove(fen, depth, timeoutMs, body.searchmoves);
       if (!bestmove) {
         res.writeHead(500, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: 'Engine returned no move' }));
