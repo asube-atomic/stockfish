@@ -7,12 +7,23 @@
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <div class="app">
-    <header>
-      <h1>Stockfish</h1>
-      <p class="subtitle">Play against the engine in your browser</p>
-    </header>
+  <div class="game">
+    <div class="player-bar">
+      <div class="player-info">
+        <span class="player-icon" id="engine-icon"></span>
+        <span class="player-name">Stockfish</span>
+        <span class="player-elo">(19)</span>
+      </div>
+      <div class="timer" id="engine-timer">&#8734;</div>
+    </div>
     <div class="board" id="board"></div>
+    <div class="player-bar">
+      <div class="player-info">
+        <span class="player-icon" id="human-icon"></span>
+        <span class="player-name">You</span>
+      </div>
+      <div class="timer" id="human-timer">&#8734;</div>
+    </div>
     <div class="status" id="status">White to move</div>
     <div class="controls">
       <button id="newgame" type="button">New game</button>

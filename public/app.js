@@ -1,6 +1,8 @@
 import { Chess } from './chess.js';
 import { pieceSVG } from './pieces.js';
 
+const FILES = 'abcdefgh';
+
 const boardEl = document.getElementById('board');
 const statusEl = document.getElementById('status');
 const depthEl = document.getElementById('depth');
@@ -8,6 +10,8 @@ const sideEl = document.getElementById('side');
 const newGameBtn = document.getElementById('newgame');
 const flipBtn = document.getElementById('flip');
 const moveLogEl = document.getElementById('movelog');
+const engineIcon = document.getElementById('engine-icon');
+const humanIcon = document.getElementById('human-icon');
 
 let game = new Chess();
 let humanColor = 'w';
@@ -40,13 +44,31 @@ function displayOrder() {
 function render() {
   boardEl.innerHTML = '';
   const order = displayOrder();
-  for (const idx of order) {
+  for (let pos = 0; pos < order.length; pos++) {
+    const idx = order[pos];
+    const isDark = ((idx % 8) + Math.floor(idx / 8)) % 2;
     const sq = document.createElement('div');
-    sq.className = 'sq ' + (((idx % 8) + Math.floor(idx / 8)) % 2 ? 'dark' : 'light');
+    sq.className = 'sq ' + (isDark ? 'dark' : 'light');
     sq.dataset.idx = idx;
 
     if (selected === idx) sq.classList.add('selected');
     if (legalForSelected.some((m) => m.to === idx)) sq.classList.add('legal');
+
+    // Coordinate labels
+    const row = Math.floor(pos / 8);
+    const col = pos % 8;
+    if (col === 0) {
+      const rank = document.createElement('span');
+      rank.className = 'coord rank-coord ' + (isDark ? 'on-dark' : 'on-light');
+      rank.textContent = 8 - Math.floor(idx / 8);
+      sq.appendChild(rank);
+    }
+    if (row === 7) {
+      const file = document.createElement('span');
+      file.className = 'coord file-coord ' + (isDark ? 'on-dark' : 'on-light');
+      file.textContent = FILES[idx % 8];
+      sq.appendChild(file);
+    }
 
     const piece = game.board[idx];
     if (piece) {
@@ -101,12 +123,10 @@ function onSquarePointerDown(e, idx) {
   dragStartY = e.clientY;
   dragMoved = false;
 
-  // Select piece and show legal moves
   selected = idx;
   legalForSelected = game.legalMoves().filter((m) => m.from === idx);
   render();
 
-  // Create floating ghost from the freshly rendered piece
   const sq = document.querySelector(`.sq[data-idx="${idx}"]`);
   const wrap = sq?.querySelector('.piece-wrap');
   if (wrap) {
@@ -154,14 +174,12 @@ function onPointerUp(e) {
   if (srcWrap) srcWrap.style.opacity = '';
 
   if (!dragMoved) {
-    // Tap — let the click handler process it
     dragFromIdx = null;
     return;
   }
 
   justDragged = true;
 
-  // Find drop target
   const target = document.elementFromPoint(e.clientX, e.clientY);
   const targetSq = target?.closest?.('.sq');
   if (targetSq) {
@@ -186,14 +204,13 @@ function onPointerUp(e) {
     }
   }
 
-  // Invalid drop — deselect
   selected = null;
   legalForSelected = [];
   dragFromIdx = null;
   render();
 }
 
-// --- Click to move (kept for taps) ---
+// --- Click to move ---
 
 function onSquareClick(idx) {
   if (justDragged) { justDragged = false; return; }
@@ -330,6 +347,11 @@ function newGame() {
   dragFromIdx = null;
   humanColor = sideEl.value;
   flipped = humanColor === 'b';
+
+  // Set player icons (engine plays opposite color)
+  if (engineIcon) engineIcon.innerHTML = pieceSVG(humanColor === 'w' ? 'p' : 'P');
+  if (humanIcon) humanIcon.innerHTML = pieceSVG(humanColor === 'w' ? 'P' : 'p');
+
   updateMoveLog();
   render();
   if (humanColor === 'b') engineMove();
