@@ -231,9 +231,9 @@ export class Chess {
     }
     if (m.castle) {
       if (m.castle === 'K') { this.board[61] = this.board[63]; this.board[63] = null; }
-      else if (m.castle === 'Q') { this.board[59] = this.board[57]; this.board[57] = null; }
+      else if (m.castle === 'Q') { this.board[59] = this.board[56]; this.board[56] = null; }
       else if (m.castle === 'k') { this.board[5] = this.board[7]; this.board[7] = null; }
-      else if (m.castle === 'q') { this.board[3] = this.board[1]; this.board[1] = null; }
+      else if (m.castle === 'q') { this.board[3] = this.board[0]; this.board[0] = null; }
     }
 
     let c = this.castling;
@@ -267,9 +267,9 @@ export class Chess {
     if (h.epCapture) { this.board[h.epCapture.idx] = h.epCapture.piece; }
     if (h.castle) {
       if (h.castle === 'K') { this.board[63] = this.board[61]; this.board[61] = null; }
-      else if (h.castle === 'Q') { this.board[57] = this.board[59]; this.board[59] = null; }
+      else if (h.castle === 'Q') { this.board[56] = this.board[59]; this.board[59] = null; }
       else if (h.castle === 'k') { this.board[7] = this.board[5]; this.board[5] = null; }
-      else if (h.castle === 'q') { this.board[1] = this.board[3]; this.board[3] = null; }
+      else if (h.castle === 'q') { this.board[0] = this.board[3]; this.board[3] = null; }
     }
     this.castling = h.castling;
     this.ep = h.ep;
