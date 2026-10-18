@@ -16,7 +16,15 @@ let selected = null;
 let legalForSelected = [];
 let thinking = false;
 let moveLog = [];
-let pendingMove = null; // {from, to} — animate after next render
+let pendingMove = null;
+
+// Drag state
+let dragFromIdx = null;
+let dragStartX = 0;
+let dragStartY = 0;
+let dragMoved = false;
+let dragGhost = null;
+let justDragged = false;
 
 function displayOrder() {
   const order = [];
@@ -48,11 +56,11 @@ function render() {
       sq.appendChild(wrap);
     }
     sq.addEventListener('click', () => onSquareClick(idx));
+    sq.addEventListener('pointerdown', (e) => onSquarePointerDown(e, idx));
     boardEl.appendChild(sq);
   }
   updateStatus();
 
-  // Animate the pending move (slide piece from source to destination)
   if (pendingMove) {
     animateMove(pendingMove.from, pendingMove.to);
     pendingMove = null;
@@ -78,6 +86,150 @@ function animateMove(fromIdx, toIdx) {
     ],
     { duration: 300, easing: 'cubic-bezier(0.25,0.46,0.45,0.94)' }
   );
+}
+
+// --- Drag and drop ---
+
+function onSquarePointerDown(e, idx) {
+  if (thinking || game.gameStatus() !== 'ongoing' || game.turn !== humanColor) return;
+  const piece = game.board[idx];
+  if (!piece || (piece === piece.toUpperCase() ? 'w' : 'b') !== humanColor) return;
+
+  e.preventDefault();
+  dragFromIdx = idx;
+  dragStartX = e.clientX;
+  dragStartY = e.clientY;
+  dragMoved = false;
+
+  // Select piece and show legal moves
+  selected = idx;
+  legalForSelected = game.legalMoves().filter((m) => m.from === idx);
+  render();
+
+  // Create floating ghost from the freshly rendered piece
+  const sq = document.querySelector(`.sq[data-idx="${idx}"]`);
+  const wrap = sq?.querySelector('.piece-wrap');
+  if (wrap) {
+    const rect = wrap.getBoundingClientRect();
+    dragGhost = wrap.cloneNode(true);
+    dragGhost.style.position = 'fixed';
+    dragGhost.style.left = rect.left + 'px';
+    dragGhost.style.top = rect.top + 'px';
+    dragGhost.style.width = rect.width + 'px';
+    dragGhost.style.height = rect.height + 'px';
+    dragGhost.style.pointerEvents = 'none';
+    dragGhost.style.zIndex = '1000';
+    dragGhost.style.transition = 'none';
+    dragGhost.classList.add('drag-ghost');
+    document.body.appendChild(dragGhost);
+    wrap.style.opacity = '0.25';
+  }
+
+  document.addEventListener('pointermove', onPointerMove);
+  document.addEventListener('pointerup', onPointerUp);
+}
+
+function onPointerMove(e) {
+  if (dragFromIdx === null) return;
+  const dx = e.clientX - dragStartX;
+  const dy = e.clientY - dragStartY;
+  if (Math.abs(dx) > 5 || Math.abs(dy) > 5) dragMoved = true;
+
+  if (dragMoved && dragGhost) {
+    const sq = document.querySelector(`.sq[data-idx="${dragFromIdx}"]`);
+    if (sq) {
+      const rect = sq.getBoundingClientRect();
+      dragGhost.style.left = (rect.left + dx) + 'px';
+      dragGhost.style.top = (rect.top + dy) + 'px';
+    }
+  }
+}
+
+function onPointerUp(e) {
+  document.removeEventListener('pointermove', onPointerMove);
+  document.removeEventListener('pointerup', onPointerUp);
+
+  if (dragGhost) { dragGhost.remove(); dragGhost = null; }
+  const srcWrap = document.querySelector(`.sq[data-idx="${dragFromIdx}"] .piece-wrap`);
+  if (srcWrap) srcWrap.style.opacity = '';
+
+  if (!dragMoved) {
+    // Tap — let the click handler process it
+    dragFromIdx = null;
+    return;
+  }
+
+  justDragged = true;
+
+  // Find drop target
+  const target = document.elementFromPoint(e.clientX, e.clientY);
+  const targetSq = target?.closest?.('.sq');
+  if (targetSq) {
+    const targetIdx = parseInt(targetSq.dataset.idx, 10);
+    const move = legalForSelected.find((m) => m.to === targetIdx);
+    if (move) {
+      if (move.promo) {
+        showPromotionDialog(dragFromIdx, targetIdx, move);
+        dragFromIdx = null;
+        return;
+      }
+      game._make(move);
+      moveLog.push(game.moveToUci(move));
+      updateMoveLog();
+      selected = null;
+      legalForSelected = [];
+      pendingMove = { from: move.from, to: move.to };
+      render();
+      if (game.gameStatus() === 'ongoing') engineMove();
+      dragFromIdx = null;
+      return;
+    }
+  }
+
+  // Invalid drop — deselect
+  selected = null;
+  legalForSelected = [];
+  dragFromIdx = null;
+  render();
+}
+
+// --- Click to move (kept for taps) ---
+
+function onSquareClick(idx) {
+  if (justDragged) { justDragged = false; return; }
+  if (thinking) return;
+  if (game.gameStatus() !== 'ongoing') return;
+  if (game.turn !== humanColor) return;
+
+  const piece = game.board[idx];
+
+  if (selected !== null) {
+    const move = legalForSelected.find((m) => m.to === idx);
+    if (move) {
+      if (move.promo) {
+        showPromotionDialog(selected, idx, move);
+        return;
+      }
+      game._make(move);
+      moveLog.push(game.moveToUci(move));
+      updateMoveLog();
+      selected = null;
+      legalForSelected = [];
+      pendingMove = { from: move.from, to: move.to };
+      render();
+      if (game.gameStatus() === 'ongoing') engineMove();
+      return;
+    }
+  }
+
+  if (piece && (piece === piece.toUpperCase() ? 'w' : 'b') === humanColor) {
+    selected = idx;
+    legalForSelected = game.legalMoves().filter((m) => m.from === idx);
+  } else {
+    selected = null;
+    legalForSelected = [];
+  }
+  render();
 }
 
 function updateStatus() {
@@ -134,42 +286,6 @@ async function engineMove() {
   render();
 }
 
-function onSquareClick(idx) {
-  if (thinking) return;
-  if (game.gameStatus() !== 'ongoing') return;
-  if (game.turn !== humanColor) return;
-
-  const piece = game.board[idx];
-
-  if (selected !== null) {
-    const move = legalForSelected.find((m) => m.to === idx);
-    if (move) {
-      if (move.promo) {
-        showPromotionDialog(selected, idx, move);
-        return;
-      }
-      game._make(move);
-      moveLog.push(game.moveToUci(move));
-      updateMoveLog();
-      selected = null;
-      legalForSelected = [];
-      pendingMove = { from: move.from, to: move.to };
-      render();
-      if (game.gameStatus() === 'ongoing') engineMove();
-      return;
-    }
-  }
-
-  if (piece && (piece === piece.toUpperCase() ? 'w' : 'b') === humanColor) {
-    selected = idx;
-    legalForSelected = game.legalMoves().filter((m) => m.from === idx);
-  } else {
-    selected = null;
-    legalForSelected = [];
-  }
-  render();
-}
-
 function showPromotionDialog(fromIdx, toIdx, baseMove) {
   const overlay = document.createElement('div');
   overlay.className = 'promo-overlay';
@@ -211,6 +327,7 @@ function newGame() {
   thinking = false;
   moveLog = [];
   pendingMove = null;
+  dragFromIdx = null;
   humanColor = sideEl.value;
   flipped = humanColor === 'b';
   updateMoveLog();
