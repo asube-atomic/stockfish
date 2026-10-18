@@ -8,6 +8,7 @@ const statusEl = document.getElementById('status');
 const depthEl = document.getElementById('depth');
 const sideEl = document.getElementById('side');
 const newGameBtn = document.getElementById('newgame');
+const undoBtn = document.getElementById('undo');
 const flipBtn = document.getElementById('flip');
 const moveLogEl = document.getElementById('movelog');
 const engineIcon = document.getElementById('engine-icon');
@@ -337,6 +338,20 @@ function showPromotionDialog(fromIdx, toIdx, baseMove) {
   document.body.appendChild(overlay);
 }
 
+function undoMove() {
+  if (thinking || game.history.length === 0) return;
+  // Undo two half-moves (engine reply + your move) so it's your turn again.
+  // If only one half-move exists (e.g. playing black), undo just that one.
+  const undoCount = Math.min(2, game.history.length);
+  for (let i = 0; i < undoCount; i++) game._unmake();
+  moveLog.splice(-undoCount);
+  selected = null;
+  legalForSelected = [];
+  pendingMove = null;
+  updateMoveLog();
+  render();
+}
+
 function newGame() {
   game = new Chess();
   selected = null;
@@ -361,6 +376,7 @@ function newGame() {
 }
 
 newGameBtn.addEventListener('click', newGame);
+undoBtn.addEventListener('click', undoMove);
 flipBtn.addEventListener('click', () => { flipped = !flipped; render(); });
 sideEl.addEventListener('change', newGame);
 
