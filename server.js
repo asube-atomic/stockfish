@@ -168,14 +168,15 @@ const server = http.createServer(async (req, res) => {
     try {
       const body = JSON.parse(await readBody(req) || '{}');
       const fen = body.fen;
-      const depth = Math.max(1, Math.min(30, parseInt(body.depth, 10) || 18));
+      const depth = Math.max(1, Math.min(30, parseInt(body.depth, 10) || 30));
       if (!fen || typeof fen !== 'string') {
         res.writeHead(400, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: 'Missing fen' }));
         return;
       }
-      // Timeout scales with depth: deeper searches get more time
-      const timeoutMs = depth <= 15 ? 30000 : depth <= 22 ? 60000 : 120000;
+      // Fast fixed time budget; engine searches as deep as possible (up to
+      // max depth) within it, then returns the best move found so far.
+      const timeoutMs = 5000;
       const bestmove = await engine.bestMove(fen, depth, timeoutMs);
       if (!bestmove) {
         res.writeHead(500, { 'Content-Type': 'application/json' });
