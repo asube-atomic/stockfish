@@ -352,6 +352,9 @@ function newGame() {
   if (engineIcon) engineIcon.innerHTML = pieceSVG(humanColor === 'w' ? 'p' : 'P');
   if (humanIcon) humanIcon.innerHTML = pieceSVG(humanColor === 'w' ? 'P' : 'p');
 
+  // Clear engine hash table for a fresh game
+  fetch('/api/newgame', { method: 'POST' }).catch(() => {});
+
   updateMoveLog();
   render();
   if (humanColor === 'b') engineMove();
