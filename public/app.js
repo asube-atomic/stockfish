@@ -618,11 +618,7 @@ sideEl.addEventListener('change', newGame);
 playOnlineBtn.addEventListener('click', showCreateChallenge);
 onlineModalClose.addEventListener('click', closeOnlineModal);
 
-// Auto-join if ?room= is in the URL
-const urlParams = new URLSearchParams(window.location.search);
-const roomParam = urlParams.get('room');
-if (roomParam) {
-  joinChallenge(roomParam);
-} else {
-  newGame();
-}
+// Auto-join if ?room= is in the URL — always render the board first
+const roomParam = new URLSearchParams(window.location.search).get('room');
+newGame();
+if (roomParam) joinChallenge(roomParam);
