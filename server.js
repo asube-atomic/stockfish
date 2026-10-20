@@ -15,6 +15,9 @@ const STOCKFISH = process.env.STOCKFISH_PATH || '/usr/local/bin/stockfish';
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const THREADS = parseInt(process.env.STOCKFISH_THREADS, 10) || 4;
 const HASH_MB = parseInt(process.env.STOCKFISH_HASH_MB, 10) || 256;
+// Time budget per move (ms). Short for snappy replies; the engine still
+// searches as deep as it can (up to the requested depth) within it.
+const MOVE_TIME_MS = parseInt(process.env.STOCKFISH_MOVE_TIME_MS, 10) || 500;
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -152,9 +155,9 @@ class Engine {
 
       this.send(`position fen ${fen}`);
       if (searchmoves && searchmoves.length > 0) {
-        this.send(`go depth ${depth} movetime 1000 searchmoves ${searchmoves.join(' ')}`);
+        this.send(`go depth ${depth} movetime ${MOVE_TIME_MS} searchmoves ${searchmoves.join(' ')}`);
       } else {
-        this.send(`go depth ${depth} movetime 1000`);
+        this.send(`go depth ${depth} movetime ${MOVE_TIME_MS}`);
       }
     });
   }
@@ -241,7 +244,7 @@ const server = http.createServer(async (req, res) => {
       }
       // Fast fixed time budget; engine searches as deep as possible (up to
       // max depth) within it, then returns the best move found so far.
-      const timeoutMs = 2000; // safety net; movetime 1000 handles actual timing
+      const timeoutMs = MOVE_TIME_MS + 500; // safety net; movetime handles actual timing
       const bestmove = await engine.bestMove(fen, depth, timeoutMs, body.searchmoves);
       if (!bestmove) {
         res.writeHead(500, { 'Content-Type': 'application/json' });
