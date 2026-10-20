@@ -36,7 +36,6 @@ let dragStartX = 0;
 let dragStartY = 0;
 let dragMoved = false;
 let dragGhost = null;
-let justDragged = false;
 
 function displayOrder() {
   const order = [];
@@ -85,7 +84,6 @@ function render() {
       wrap.innerHTML = pieceSVG(piece);
       sq.appendChild(wrap);
     }
-    sq.addEventListener('click', () => onSquareClick(idx));
     sq.addEventListener('pointerdown', (e) => onSquarePointerDown(e, idx));
     boardEl.appendChild(sq);
   }
@@ -132,20 +130,22 @@ function animateMove(fromIdx, toIdx) {
 function onSquarePointerDown(e, idx) {
   if (thinking || game.gameStatus() !== 'ongoing' || game.turn !== humanColor) return;
   const piece = game.board[idx];
-  if (!piece || (piece === piece.toUpperCase() ? 'w' : 'b') !== humanColor) return;
+  const isOwn = !!piece && (piece === piece.toUpperCase() ? 'w' : 'b') === humanColor;
 
-  e.preventDefault();
-  dragFromIdx = idx;
+  dragFromIdx = isOwn ? idx : null;
   dragStartX = e.clientX;
   dragStartY = e.clientY;
   dragMoved = false;
 
-  selected = idx;
-  legalForSelected = game.legalMoves().filter((m) => m.from === idx);
-  render();
+  if (isOwn) {
+    e.preventDefault();
+    selected = idx;
+    legalForSelected = game.legalMoves().filter((m) => m.from === idx);
+    render();
+  }
 
   const sq = document.querySelector(`.sq[data-idx="${idx}"]`);
-  const wrap = sq?.querySelector('.piece-wrap');
+  const wrap = isOwn ? sq?.querySelector('.piece-wrap') : null;
   if (wrap) {
     const rect = wrap.getBoundingClientRect();
     dragGhost = wrap.cloneNode(true);
@@ -187,17 +187,24 @@ function onPointerUp(e) {
   document.removeEventListener('pointerup', onPointerUp);
 
   if (dragGhost) { dragGhost.remove(); dragGhost = null; }
-  const srcWrap = document.querySelector(`.sq[data-idx="${dragFromIdx}"] .piece-wrap`);
+  const srcWrap = dragFromIdx !== null
+    ? document.querySelector(`.sq[data-idx="${dragFromIdx}"] .piece-wrap`)
+    : null;
   if (srcWrap) srcWrap.style.opacity = '';
 
+  const target = document.elementFromPoint(e.clientX, e.clientY);
+
   if (!dragMoved) {
+    // A tap (not a drag): select a piece or complete a move on the square
+    // under the pointer. Handled here instead of on 'click' so tapping works
+    // on touch devices and after the board re-renders mid-gesture.
+    const tapSq = target?.closest?.('.sq');
+    const tapIdx = tapSq ? parseInt(tapSq.dataset.idx, 10) : dragFromIdx;
     dragFromIdx = null;
+    if (tapIdx !== null && !Number.isNaN(tapIdx)) onSquareClick(tapIdx);
     return;
   }
 
-  justDragged = true;
-
-  const target = document.elementFromPoint(e.clientX, e.clientY);
   const targetSq = target?.closest?.('.sq');
   if (targetSq) {
     const targetIdx = parseInt(targetSq.dataset.idx, 10);
@@ -232,7 +239,6 @@ function onPointerUp(e) {
 // --- Click to move ---
 
 function onSquareClick(idx) {
-  if (justDragged) { justDragged = false; return; }
   if (thinking) return;
   if (game.gameStatus() !== 'ongoing') return;
   if (game.turn !== humanColor) return;
@@ -316,12 +322,19 @@ function countPosition(key) {
 }
 
 async function callEngine(fen, depth, searchmoves) {
-  const resp = await fetch('/api/bestmove', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ fen, depth, searchmoves }),
-  });
-  return resp.json();
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 12000);
+  try {
+    const resp = await fetch('/api/bestmove', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fen, depth, searchmoves }),
+      signal: ctrl.signal,
+    });
+    return await resp.json();
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 async function engineMove() {
@@ -364,9 +377,11 @@ async function engineMove() {
     }
   } catch (e) {
     statusEl.textContent = 'Engine error: ' + (e.message || e);
+  } finally {
+    // Always release the board, even if the engine call failed or timed out
+    thinking = false;
+    render();
   }
-  thinking = false;
-  render();
 }
 
 function showPromotionDialog(fromIdx, toIdx, baseMove) {

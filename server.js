@@ -116,7 +116,14 @@ class Engine {
 
   async waitForReady() {
     if (this.ready) return;
-    await new Promise((resolve) => this.readyWaiters.push(resolve));
+    await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        // Engine never reported ready — restart it so the UI can recover
+        try { this.proc.kill(); } catch {}
+        reject(new Error('Engine not ready'));
+      }, 10000);
+      this.readyWaiters.push(() => { clearTimeout(timer); resolve(); });
+    });
   }
 
   async bestMove(fen, depth, timeoutMs, searchmoves) {
