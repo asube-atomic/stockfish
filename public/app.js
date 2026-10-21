@@ -27,6 +27,7 @@ let legalForSelected = [];
 let thinking = false;
 let moveLog = [];
 let pendingMove = null;
+let lastMove = null;
 let isOnline = false;
 let onlineGame = null;
 
@@ -49,6 +50,10 @@ function displayOrder() {
 }
 
 function render() {
+  // Note the move just played before painting, so this very render already
+  // shows it highlighted (the slide animation still runs at the end).
+  if (pendingMove) lastMove = pendingMove;
+
   boardEl.innerHTML = '';
   const order = displayOrder();
   for (let pos = 0; pos < order.length; pos++) {
@@ -60,6 +65,7 @@ function render() {
 
     if (selected === idx) sq.classList.add('selected');
     if (legalForSelected.some((m) => m.to === idx)) sq.classList.add('legal');
+    if (lastMove && (lastMove.from === idx || lastMove.to === idx)) sq.classList.add('lastmove');
 
     // Coordinate labels
     const row = Math.floor(pos / 8);
@@ -92,6 +98,17 @@ function render() {
   if (pendingMove) {
     animateMove(pendingMove.from, pendingMove.to);
     pendingMove = null;
+  }
+}
+
+// Repaint selection and legal-move hints by toggling classes on the existing
+// squares. Rebuilding all 64 squares (and re-parsing their piece SVGs) on every
+// tap and drag start is what made picking a piece feel sluggish.
+function paintSelection() {
+  for (const sq of boardEl.children) {
+    const idx = Number(sq.dataset.idx);
+    sq.classList.toggle('selected', selected === idx);
+    sq.classList.toggle('legal', legalForSelected.some((m) => m.to === idx));
   }
 }
 
@@ -141,7 +158,7 @@ function onSquarePointerDown(e, idx) {
     e.preventDefault();
     selected = idx;
     legalForSelected = game.legalMoves().filter((m) => m.from === idx);
-    render();
+    paintSelection();
   }
 
   const sq = document.querySelector(`.sq[data-idx="${idx}"]`);
@@ -152,6 +169,7 @@ function onSquarePointerDown(e, idx) {
     dragGhost.style.position = 'fixed';
     dragGhost.style.left = rect.left + 'px';
     dragGhost.style.top = rect.top + 'px';
+    dragGhost.style.transform = 'translate3d(0, 0, 0)';
     dragGhost.style.width = rect.width + 'px';
     dragGhost.style.height = rect.height + 'px';
     dragGhost.style.pointerEvents = 'none';
@@ -173,12 +191,9 @@ function onPointerMove(e) {
   if (Math.abs(dx) > 5 || Math.abs(dy) > 5) dragMoved = true;
 
   if (dragMoved && dragGhost) {
-    const sq = document.querySelector(`.sq[data-idx="${dragFromIdx}"]`);
-    if (sq) {
-      const rect = sq.getBoundingClientRect();
-      dragGhost.style.left = (rect.left + dx) + 'px';
-      dragGhost.style.top = (rect.top + dy) + 'px';
-    }
+    // Follow the pointer with a transform: no layout work per event, so the
+    // dragged piece keeps up with the pointer instead of trailing it.
+    dragGhost.style.transform = `translate3d(${dx}px, ${dy}px, 0)`;
   }
 }
 
@@ -233,7 +248,7 @@ function onPointerUp(e) {
   selected = null;
   legalForSelected = [];
   dragFromIdx = null;
-  render();
+  paintSelection();
 }
 
 // --- Click to move ---
@@ -273,7 +288,7 @@ function onSquareClick(idx) {
     selected = null;
     legalForSelected = [];
   }
-  render();
+  paintSelection();
 }
 
 function updateStatus() {
@@ -452,7 +467,7 @@ function showPromotionDialog(fromIdx, toIdx, baseMove) {
     overlay.remove();
     selected = null;
     legalForSelected = [];
-    render();
+    paintSelection();
   });
   overlay.appendChild(cancel);
   document.body.appendChild(overlay);
@@ -468,6 +483,7 @@ function undoMove() {
   selected = null;
   legalForSelected = [];
   pendingMove = null;
+  lastMove = null;
   updateMoveLog();
   render();
 }
@@ -537,6 +553,7 @@ function startOnlineGame(data) {
   thinking = false;
   moveLog = [];
   pendingMove = null;
+  lastMove = null;
   humanColor = onlineGame.color;
   flipped = humanColor === 'b';
 
@@ -648,6 +665,7 @@ function newGame() {
   thinking = false;
   moveLog = [];
   pendingMove = null;
+  lastMove = null;
   dragFromIdx = null;
   humanColor = sideEl.value;
   flipped = humanColor === 'b';
