@@ -71,11 +71,15 @@ class Engine {
 
     this.proc.stdout.on('data', (d) => {
       for (const line of d.toString().split('\n')) {
-        if (!line.trim()) continue;
-        this.handleLine(line.trim());
+        const text = line.trim();
+        if (!text) continue;
+        // Stockfish 19 terminates on an invalid position or command and
+        // reports it here — surface it instead of failing silently.
+        if (text.includes('CRITICAL')) console.error('[stockfish] ' + text);
+        this.handleLine(text);
       }
     });
-    this.proc.stderr.on('data', () => {});
+    this.proc.stderr.on('data', (d) => console.error('[stockfish] ' + d.toString().trim()));
 
     this.proc.on('close', () => {
       if (this.pendingResolve) {

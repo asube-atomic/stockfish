@@ -128,7 +128,7 @@ function animateMove(fromIdx, toIdx) {
 // --- Drag and drop ---
 
 function onSquarePointerDown(e, idx) {
-  if (thinking || game.gameStatus() !== 'ongoing' || game.turn !== humanColor) return;
+  if (thinking || gameFinished() || game.turn !== humanColor) return;
   const piece = game.board[idx];
   const isOwn = !!piece && (piece === piece.toUpperCase() ? 'w' : 'b') === humanColor;
 
@@ -224,7 +224,7 @@ function onPointerUp(e) {
       pendingMove = { from: move.from, to: move.to };
       render();
       if (isOnline) onlineGame.sendMove(uci);
-      else if (game.gameStatus() === 'ongoing') engineMove();
+      else if (!gameFinished()) engineMove();
       dragFromIdx = null;
       return;
     }
@@ -240,7 +240,7 @@ function onPointerUp(e) {
 
 function onSquareClick(idx) {
   if (thinking) return;
-  if (game.gameStatus() !== 'ongoing') return;
+  if (gameFinished()) return;
   if (game.turn !== humanColor) return;
 
   const piece = game.board[idx];
@@ -261,7 +261,7 @@ function onSquareClick(idx) {
       pendingMove = { from: move.from, to: move.to };
       render();
       if (isOnline) onlineGame.sendMove(uci);
-      else if (game.gameStatus() === 'ongoing') engineMove();
+      else if (!gameFinished()) engineMove();
       return;
     }
   }
@@ -282,7 +282,6 @@ function updateStatus() {
   if (status === 'checkmate-white') text = 'Checkmate — White wins!';
   else if (status === 'checkmate-black') text = 'Checkmate — Black wins!';
   else if (status === 'stalemate') text = 'Stalemate — Draw';
-  else if (status === 'fifty-move') text = 'Draw — 50-move rule';
   else {
     const who = game.turn === 'w' ? 'White' : 'Black';
     const check = game.inCheck(game.turn) ? ' — Check!' : '';
@@ -337,18 +336,42 @@ async function callEngine(fen, depth, searchmoves) {
   }
 }
 
+// Ask the engine for a move, retrying briefly so a transient hiccup
+// (engine restarting, busy or timed out) cannot leave the game stuck.
+async function askEngine(fen, depth, searchmoves) {
+  let lastErr = null;
+  for (let attempt = 0; attempt < 4; attempt++) {
+    try {
+      const data = await callEngine(fen, depth, searchmoves);
+      if (data && data.bestmove) return data;
+      lastErr = new Error((data && data.error) || 'no move returned');
+    } catch (e) {
+      lastErr = e;
+    }
+    await new Promise((r) => setTimeout(r, 400));
+  }
+  throw lastErr || new Error('engine unavailable');
+}
+
+// The game is only over once it is really decided (mate or stalemate).
+// A draw by the fifty-move rule does not stop play, so the engine keeps
+// playing a long endgame instead of stopping mid-game.
+function gameFinished() {
+  const status = game.gameStatus();
+  return status !== 'ongoing' && status !== 'fifty-move';
+}
+
 async function engineMove() {
-  if (game.gameStatus() !== 'ongoing') return;
+  if (gameFinished()) return;
   thinking = true;
   updateStatus();
   try {
     const depth = parseInt(depthEl.value, 10) || 8;
-    let data = await callEngine(game.fen(), depth);
-    if (!data.bestmove) return;
+    let data = await askEngine(game.fen(), depth);
 
     let bestUci = data.bestmove;
     let m = game.parseUci(bestUci);
-    if (!m) return;
+    if (!m) throw new Error('engine returned an unplayable move: ' + bestUci);
 
     // Check if the engine's move leads to a threefold repetition
     const tempGame = new Chess(game.fen());
@@ -361,10 +384,12 @@ async function engineMove() {
         .map((mv) => game.moveToUci(mv))
         .filter((u) => u !== bestUci);
       if (legalMoves.length > 0) {
-        data = await callEngine(game.fen(), depth, legalMoves);
-        if (data.bestmove) {
-          bestUci = data.bestmove;
-          m = game.parseUci(bestUci);
+        try {
+          const alt = await askEngine(game.fen(), depth, legalMoves);
+          const altMove = game.parseUci(alt.bestmove);
+          if (altMove) { bestUci = alt.bestmove; m = altMove; }
+        } catch (e) {
+          // No alternative available — keep the engine's original move
         }
       }
     }
@@ -403,7 +428,7 @@ function showPromotionDialog(fromIdx, toIdx, baseMove) {
       pendingMove = { from: m.from, to: m.to };
       render();
       if (isOnline) onlineGame.sendMove(uci);
-      else if (game.gameStatus() === 'ongoing') engineMove();
+      else if (!gameFinished()) engineMove();
     });
     overlay.appendChild(btn);
   }
