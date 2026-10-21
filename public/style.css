@@ -156,9 +156,17 @@ body {
 }
 
 .drag-ghost {
-  filter: drop-shadow(0 6px 8px rgba(0,0,0,0.5));
-  cursor: grabbing;
+  /* A wide blur is expensive to re-raster on every pointer update, so the
+     dragged piece carries a tight, cheap shadow instead. */
+  filter: drop-shadow(0 2px 3px rgba(0,0,0,0.5));
+  pointer-events: none;
   will-change: transform;
+}
+
+/* Keep the grabbed cursor for the whole gesture, not just over the board */
+body.dragging,
+body.dragging * {
+  cursor: grabbing !important;
 }
 
 .status {

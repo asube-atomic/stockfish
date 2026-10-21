@@ -35,6 +35,8 @@ let onlineGame = null;
 let dragFromIdx = null;
 let dragStartX = 0;
 let dragStartY = 0;
+let dragDx = 0;
+let dragDy = 0;
 let dragMoved = false;
 let dragGhost = null;
 
@@ -152,6 +154,8 @@ function onSquarePointerDown(e, idx) {
   dragFromIdx = isOwn ? idx : null;
   dragStartX = e.clientX;
   dragStartY = e.clientY;
+  dragDx = 0;
+  dragDy = 0;
   dragMoved = false;
 
   if (isOwn) {
@@ -178,9 +182,10 @@ function onSquarePointerDown(e, idx) {
     dragGhost.classList.add('drag-ghost');
     document.body.appendChild(dragGhost);
     wrap.style.opacity = '0.25';
+    document.body.classList.add('dragging');
   }
 
-  document.addEventListener('pointermove', onPointerMove);
+  document.addEventListener('pointermove', onPointerMove, { passive: true });
   document.addEventListener('pointerup', onPointerUp);
 }
 
@@ -190,9 +195,12 @@ function onPointerMove(e) {
   const dy = e.clientY - dragStartY;
   if (Math.abs(dx) > 5 || Math.abs(dy) > 5) dragMoved = true;
 
-  if (dragMoved && dragGhost) {
-    // Follow the pointer with a transform: no layout work per event, so the
-    // dragged piece keeps up with the pointer instead of trailing it.
+  // Follow the pointer with a transform, written only when the pointer really
+  // moved: no layout work per event and no needless compositor updates, so the
+  // dragged piece stays glued to the pointer.
+  if (dragMoved && dragGhost && (dx !== dragDx || dy !== dragDy)) {
+    dragDx = dx;
+    dragDy = dy;
     dragGhost.style.transform = `translate3d(${dx}px, ${dy}px, 0)`;
   }
 }
@@ -200,6 +208,7 @@ function onPointerMove(e) {
 function onPointerUp(e) {
   document.removeEventListener('pointermove', onPointerMove);
   document.removeEventListener('pointerup', onPointerUp);
+  document.body.classList.remove('dragging');
 
   if (dragGhost) { dragGhost.remove(); dragGhost = null; }
   const srcWrap = dragFromIdx !== null
