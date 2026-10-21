@@ -306,18 +306,29 @@ function posKey(fen) {
   return fen.split(' ').slice(0, 4).join(' ');
 }
 
-// Count how many times a position key has occurred in the game
-function countPosition(key) {
+// Every position that has already been played in this game, including the
+// starting position. Replaying the log once is much cheaper than re-walking
+// it for every candidate move.
+function seenPositions() {
+  const seen = new Set();
   const temp = new Chess();
-  let count = 0;
-  if (posKey(temp.fen()) === key) count++;
+  seen.add(posKey(temp.fen()));
   for (const uci of moveLog) {
     const m = temp.parseUci(uci);
     if (!m) break;
     temp._make(m);
-    if (posKey(temp.fen()) === key) count++;
+    seen.add(posKey(temp.fen()));
   }
-  return count;
+  return seen;
+}
+
+// Would this move bring back a position that has already been played?
+// This is the only way a game is drawn by repetition, so the engine stays
+// away from such moves as long as it has anything else to play.
+function repeatsPosition(move, seen) {
+  const temp = new Chess(game.fen());
+  temp._make(move);
+  return seen.has(posKey(temp.fen()));
 }
 
 async function callEngine(fen, depth, searchmoves) {
@@ -373,23 +384,25 @@ async function engineMove() {
     let m = game.parseUci(bestUci);
     if (!m) throw new Error('engine returned an unplayable move: ' + bestUci);
 
-    // Check if the engine's move leads to a threefold repetition
-    const tempGame = new Chess(game.fen());
-    tempGame._make(m);
-    const repCount = countPosition(posKey(tempGame.fen()));
+    // Never let the engine shuffle the game into a repetition draw: if its
+    // move brings back a position already played, ask it again for the best
+    // move that keeps the game moving forward instead.
+    const seen = seenPositions();
+    if (repeatsPosition(m, seen)) {
+      const alternatives = game.legalMoves()
+        .filter((mv) => !repeatsPosition(mv, seen))
+        .map((mv) => game.moveToUci(mv));
 
-    if (repCount >= 2) {
-      // Repetition detected — request alternative excluding this move
-      const legalMoves = game.legalMoves()
-        .map((mv) => game.moveToUci(mv))
-        .filter((u) => u !== bestUci);
-      if (legalMoves.length > 0) {
+      if (alternatives.length > 0) {
         try {
-          const alt = await askEngine(game.fen(), depth, legalMoves);
+          const alt = await askEngine(game.fen(), depth, alternatives);
           const altMove = game.parseUci(alt.bestmove);
-          if (altMove) { bestUci = alt.bestmove; m = altMove; }
+          if (altMove && !repeatsPosition(altMove, seen)) {
+            bestUci = alt.bestmove;
+            m = altMove;
+          }
         } catch (e) {
-          // No alternative available — keep the engine's original move
+          // Engine unreachable — play its first choice rather than stall
         }
       }
     }
