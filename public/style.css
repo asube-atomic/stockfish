@@ -342,3 +342,88 @@ button:hover { background: #4a4a4a; }
 .timer.low {
   color: #e74c3c;
 }
+
+/* Free-position editor */
+.board.editing {
+  cursor: grab;
+  box-shadow: 0 0 0 3px var(--accent), 0 4px 24px rgba(0,0,0,0.4);
+}
+
+.edit-panel {
+  margin-top: 14px;
+  width: 100%;
+  background: var(--panel);
+  border-radius: 8px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+
+/* The panel is toggled with the hidden attribute, which the flex display
+   above would otherwise override. */
+.edit-panel[hidden] { display: none; }
+
+.edit-hint {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--muted);
+  text-align: center;
+  line-height: 1.4;
+}
+
+.edit-hint.error { color: #e74c3c; }
+
+.palette {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 4px;
+}
+
+/* Palette pieces sit on light tiles so the black ones stay visible. */
+.palette-btn {
+  width: 38px;
+  height: 38px;
+  padding: 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--light);
+  border: none;
+  border-radius: 6px;
+}
+
+.palette-btn:hover { background: #fff3dd; }
+
+.palette-btn.active {
+  background: #fff3dd;
+  box-shadow: 0 0 0 2px var(--accent-light);
+}
+
+.palette-btn svg { width: 100%; height: 100%; }
+
+.palette-btn.erase {
+  background: var(--bg);
+  color: var(--muted);
+  font-size: 1rem;
+  line-height: 1;
+}
+
+.edit-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  justify-content: center;
+}
+
+.edit-controls .field select { width: 90px; }
+
+button.primary {
+  background: var(--accent);
+  border-color: var(--accent-light);
+}
+
+button.primary:hover { background: #6fae2a; }

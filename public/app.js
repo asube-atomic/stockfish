@@ -1,6 +1,7 @@
 import { Chess } from './chess.js';
 import { pieceSVG } from './pieces.js';
 import { OnlineGame } from './online.js';
+import { PositionEditor } from './editor.js';
 
 const FILES = 'abcdefgh';
 
@@ -18,8 +19,21 @@ const playOnlineBtn = document.getElementById('play-online');
 const onlineModal = document.getElementById('online-modal');
 const onlineModalClose = document.getElementById('online-modal-close');
 const onlineModalContent = document.getElementById('online-modal-content');
+const editPanel = document.getElementById('edit-panel');
+const editPositionBtn = document.getElementById('edit-position');
+
+// The editor works on its own board array: the app paints it while editing and
+// resumes play from the position it hands over.
+const editor = new PositionEditor({
+  panelEl: editPanel,
+  onRender: () => render(),
+  onPlay: (fen) => playEditedPosition(fen),
+});
 
 let game = new Chess();
+// Where the current game began — the usual starting position, or the position
+// an edit left the board in. Repetition detection replays the log from here.
+let startFen = null;
 let humanColor = 'w';
 let flipped = false;
 let selected = null;
@@ -57,6 +71,11 @@ function render() {
   if (pendingMove) lastMove = pendingMove;
 
   boardEl.innerHTML = '';
+  boardEl.classList.toggle('editing', editor.active);
+  // While editing, the board shows the position being assembled instead of the
+  // live game: it has no selection and no last-move tint, those belong to play.
+  const board = editor.active ? editor.board : game.board;
+  const sel = editor.active ? editor.selected : selected;
   const order = displayOrder();
   for (let pos = 0; pos < order.length; pos++) {
     const idx = order[pos];
@@ -65,9 +84,9 @@ function render() {
     sq.className = 'sq ' + (isDark ? 'dark' : 'light');
     sq.dataset.idx = idx;
 
-    if (selected === idx) sq.classList.add('selected');
-    if (legalForSelected.some((m) => m.to === idx)) sq.classList.add('legal');
-    if (lastMove && (lastMove.from === idx || lastMove.to === idx)) sq.classList.add('lastmove');
+    if (sel === idx) sq.classList.add('selected');
+    if (!editor.active && legalForSelected.some((m) => m.to === idx)) sq.classList.add('legal');
+    if (!editor.active && lastMove && (lastMove.from === idx || lastMove.to === idx)) sq.classList.add('lastmove');
 
     // Coordinate labels
     const row = Math.floor(pos / 8);
@@ -85,7 +104,7 @@ function render() {
       sq.appendChild(file);
     }
 
-    const piece = game.board[idx];
+    const piece = board[idx];
     if (piece) {
       const wrap = document.createElement('div');
       wrap.className = 'piece-wrap';
@@ -178,27 +197,18 @@ function findCastleMove(fromIdx, toIdx) {
   return null;
 }
 
-function onSquarePointerDown(e, idx) {
-  if (thinking || gameFinished() || game.turn !== humanColor) return;
-  const piece = game.board[idx];
-  const isOwn = !!piece && (piece === piece.toUpperCase() ? 'w' : 'b') === humanColor;
-
-  dragFromIdx = isOwn ? idx : null;
+// Begin a gesture on a square. `grabIdx` is the square whose piece is being
+// dragged, or null when the gesture starts on an empty square.
+function startPointerGesture(e, idx, grabIdx) {
+  dragFromIdx = grabIdx;
   dragStartX = e.clientX;
   dragStartY = e.clientY;
   dragDx = 0;
   dragDy = 0;
   dragMoved = false;
 
-  if (isOwn) {
-    e.preventDefault();
-    selected = idx;
-    legalForSelected = game.legalMoves().filter((m) => m.from === idx);
-    paintSelection();
-  }
-
   const sq = document.querySelector(`.sq[data-idx="${idx}"]`);
-  const wrap = isOwn ? sq?.querySelector('.piece-wrap') : null;
+  const wrap = grabIdx === null ? null : sq?.querySelector('.piece-wrap');
   if (wrap) {
     const rect = wrap.getBoundingClientRect();
     dragGhost = wrap.cloneNode(true);
@@ -219,6 +229,27 @@ function onSquarePointerDown(e, idx) {
 
   document.addEventListener('pointermove', onPointerMove, { passive: true });
   document.addEventListener('pointerup', onPointerUp);
+}
+
+function onSquarePointerDown(e, idx) {
+  // While editing both colours can be lifted from any square; a tap on a square
+  // holding no piece still reaches the editor so the palette brush can paint it.
+  if (editor.active) {
+    if (editor.board[idx]) e.preventDefault();
+    startPointerGesture(e, idx, editor.board[idx] ? idx : null);
+    return;
+  }
+
+  if (thinking || gameFinished() || game.turn !== humanColor) return;
+  const piece = game.board[idx];
+  const isOwn = !!piece && (piece === piece.toUpperCase() ? 'w' : 'b') === humanColor;
+  if (isOwn) {
+    e.preventDefault();
+    selected = idx;
+    legalForSelected = game.legalMoves().filter((m) => m.from === idx);
+    paintSelection();
+  }
+  startPointerGesture(e, idx, isOwn ? idx : null);
 }
 
 function onPointerMove(e) {
@@ -257,11 +288,21 @@ function onPointerUp(e) {
     const tapSq = target?.closest?.('.sq');
     const tapIdx = tapSq ? parseInt(tapSq.dataset.idx, 10) : dragFromIdx;
     dragFromIdx = null;
-    if (tapIdx !== null && !Number.isNaN(tapIdx)) onSquareClick(tapIdx);
+    if (tapIdx !== null && !Number.isNaN(tapIdx)) {
+      if (editor.active) editor.tapSquare(tapIdx);
+      else onSquareClick(tapIdx);
+    }
     return;
   }
 
   const targetSq = target?.closest?.('.sq');
+  if (editor.active) {
+    // Let go on a square: the piece lands there. Let go off the board: the
+    // piece comes off, which is how a stray piece is removed.
+    editor.dropPiece(dragFromIdx, targetSq ? parseInt(targetSq.dataset.idx, 10) : null);
+    dragFromIdx = null;
+    return;
+  }
   if (targetSq) {
     const targetIdx = parseInt(targetSq.dataset.idx, 10);
     // A castle read from the gesture wins over the rook's plain move to the
@@ -335,6 +376,11 @@ function onSquareClick(idx) {
 }
 
 function updateStatus() {
+  if (editor.active) {
+    statusEl.textContent = 'Editing position';
+    statusEl.className = 'status';
+    return;
+  }
   const status = game.gameStatus();
   let text;
   if (status === 'checkmate-white') text = 'Checkmate — White wins!';
@@ -369,7 +415,7 @@ function posKey(fen) {
 // it for every candidate move.
 function seenPositions() {
   const seen = new Set();
-  const temp = new Chess();
+  const temp = new Chess(startFen);
   seen.add(posKey(temp.fen()));
   for (const uci of moveLog) {
     const m = temp.parseUci(uci);
@@ -589,6 +635,10 @@ function makeOnlineCallbacks() {
 }
 
 function startOnlineGame(data) {
+  // A live game against a person cannot be edited: the edited board would no
+  // longer match the opponent's.
+  if (editor.active) editor.exit();
+  editPositionBtn.disabled = true;
   isOnline = true;
   game = new Chess();
   selected = null;
@@ -697,7 +747,27 @@ function closeOnlineModal() {
   }
 }
 
+// Resume play from the position the editor handed over.
+function playEditedPosition(fen) {
+  startFen = fen;
+  game = new Chess(fen);
+  selected = null;
+  legalForSelected = [];
+  thinking = false;
+  moveLog = [];
+  pendingMove = null;
+  lastMove = null;
+  updateMoveLog();
+  fetch('/api/newgame', { method: 'POST' }).catch(() => {});
+  render();
+  // An edit can leave the engine on move; in that case it moves right away.
+  if (game.turn !== humanColor) engineMove();
+}
+
 function newGame() {
+  if (editor.active) editor.exit();
+  editPositionBtn.disabled = false;
+  startFen = null;
   if (isOnline && onlineGame) {
     onlineGame.leave();
     onlineGame = null;
@@ -738,6 +808,10 @@ function newGame() {
 
 newGameBtn.addEventListener('click', newGame);
 undoBtn.addEventListener('click', undoMove);
+editPositionBtn.addEventListener('click', () => {
+  if (thinking || editor.active) return;
+  editor.begin(game.fen());
+});
 flipBtn.addEventListener('click', () => { flipped = !flipped; render(); });
 sideEl.addEventListener('change', newGame);
 playOnlineBtn.addEventListener('click', showCreateChallenge);
