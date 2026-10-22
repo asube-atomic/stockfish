@@ -318,7 +318,7 @@ function onPointerUp(e) {
       legalForSelected = [];
       pendingMove = { from: move.from, to: move.to };
       render();
-      if (isOnline) onlineGame.sendMove(uci);
+      if (isOnline) onlineGame.sendMove(uci, game.fen());
       else if (!gameFinished()) engineMove();
       dragFromIdx = null;
       return;
@@ -354,7 +354,7 @@ function onSquareClick(idx) {
       legalForSelected = [];
       pendingMove = { from: move.from, to: move.to };
       render();
-      if (isOnline) onlineGame.sendMove(uci);
+      if (isOnline) onlineGame.sendMove(uci, game.fen());
       else if (!gameFinished()) engineMove();
       return;
     }
@@ -570,7 +570,7 @@ function showPromotionDialog(fromIdx, toIdx, baseMove) {
       overlay.remove();
       pendingMove = { from: m.from, to: m.to };
       render();
-      if (isOnline) onlineGame.sendMove(uci);
+      if (isOnline) onlineGame.sendMove(uci, game.fen());
       else if (!gameFinished()) engineMove();
     });
     overlay.appendChild(btn);
@@ -678,10 +678,18 @@ function startOnlineGame(data) {
   humanColor = onlineGame.color;
   flipped = humanColor === 'b';
 
+  // Reopening a game's link mid-game: catch up with the moves played so far.
+  for (const uci of data.history || []) {
+    const m = game.parseUci(uci);
+    if (!m) break;
+    game._make(m);
+    recordMove(uci);
+  }
+
   const topName = document.querySelector('.player-bar .player-name');
   const topElo = document.querySelector('.player-bar .player-elo');
-  if (topName) topName.textContent = 'Opponent';
-  if (topElo) topElo.textContent = '';
+  if (topName) topName.textContent = data.engine ? 'Stockfish' : 'Opponent';
+  if (topElo) topElo.textContent = data.engine ? '(19)' : '';
 
   onlineModal.style.display = 'none';
 
@@ -719,21 +727,39 @@ function showCreateChallenge() {
         </select>
       </label>
       <button id="create-challenge-btn" type="button">Create Challenge</button>
+      <button id="play-engine-btn" type="button">Play vs Stockfish</button>
     </div>
   `;
   onlineModal.style.display = 'flex';
-  document.getElementById('create-challenge-btn').addEventListener('click', createChallenge);
+  document.getElementById('create-challenge-btn').addEventListener('click', () => createChallenge(false));
+  document.getElementById('play-engine-btn').addEventListener('click', () => createChallenge(true));
 }
 
-async function createChallenge() {
+// A challenge waits for a second player to open the link. A game against the
+// engine starts at once, with Stockfish on the other side and the game's link
+// left in the address bar so it can be reopened later.
+async function createChallenge(vsEngine) {
   const tc = parseInt(document.getElementById('time-control').value, 10);
-  onlineModalContent.innerHTML = '<p>Creating challenge...</p>';
+  onlineModalContent.innerHTML = vsEngine
+    ? '<p>Starting game against Stockfish...</p>'
+    : '<p>Creating challenge...</p>';
 
   onlineGame = new OnlineGame(makeOnlineCallbacks());
 
   try {
-    const data = await onlineGame.createRoom(tc);
+    const data = await onlineGame.createRoom(tc, vsEngine);
     const link = window.location.origin + window.location.pathname + '?room=' + data.roomId;
+    if (data.engine) {
+      window.history.replaceState({}, '', window.location.pathname + '?room=' + data.roomId);
+      startOnlineGame({
+        color: data.color,
+        timeControl: data.timeControl,
+        timers: data.timers,
+        engine: true,
+      });
+      onlineModal.style.display = 'none';
+      return;
+    }
     onlineModalContent.innerHTML = `
       <p>Share this link with your opponent:</p>
       <div class="challenge-link-row">

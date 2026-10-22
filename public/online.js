@@ -9,11 +9,11 @@ export class OnlineGame {
     this.es = null;
   }
 
-  async createRoom(timeControl) {
+  async createRoom(timeControl, vsEngine) {
     const resp = await fetch('/api/createroom', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ timeControl }),
+      body: JSON.stringify({ timeControl, opponent: vsEngine ? 'engine' : undefined }),
     });
     const data = await resp.json();
     if (data.error) throw new Error(data.error);
@@ -59,11 +59,13 @@ export class OnlineGame {
     if (cb) cb(event);
   }
 
-  async sendMove(uci) {
+  // `fen` is the position the move created: an engine game needs it to ask
+  // Stockfish for its reply.
+  async sendMove(uci, fen) {
     await fetch('/api/onlinemove', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ roomId: this.roomId, uci }),
+      body: JSON.stringify({ roomId: this.roomId, uci, fen }),
     });
   }
 

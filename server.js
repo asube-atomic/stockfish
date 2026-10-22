@@ -18,6 +18,8 @@ const HASH_MB = parseInt(process.env.STOCKFISH_HASH_MB, 10) || 256;
 // Time budget per move (ms). Short for snappy replies; the engine still
 // searches as deep as it can (up to the requested depth) within it.
 const MOVE_TIME_MS = parseInt(process.env.STOCKFISH_MOVE_TIME_MS, 10) || 500;
+// Depth ceiling for an engine game's moves: the same ceiling the UI's depth box sends.
+const ENGINE_DEPTH = 30;
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -210,6 +212,43 @@ function removeClient(roomId, res) {
   }
 }
 
+// In an engine game the room plays Stockfish's side itself, so the reply is
+// there for everyone watching the game instead of depending on the human's page
+// staying responsive. The search is the same full-strength half second a game
+// against the computer uses.
+async function playEngineMove(roomId) {
+  const room = rooms.get(roomId);
+  if (!room || !room.engineColor || room.finished || room.engineThinking) return;
+  if (room.turn !== room.engineColor || !room.position) return;
+
+  room.engineThinking = true;
+  try {
+    let uci = null;
+    for (let attempt = 0; attempt < 20 && !uci; attempt++) {
+      try {
+        const answer = await engine.bestMove(room.position, ENGINE_DEPTH, MOVE_TIME_MS + 500);
+        if (answer && !/^[a-h][1-8][a-h][1-8][qrbn]?$/.test(answer)) {
+          // Mate or stalemate: the engine has no move to play, so the game is over.
+          room.finished = true;
+          return;
+        }
+        uci = answer;
+      } catch (e) {
+        // The engine serves one search at a time — wait for a free moment.
+        await new Promise((resolve) => setTimeout(resolve, 150));
+      }
+    }
+    if (room.finished || !uci || room.turn !== room.engineColor) return;
+
+    room.turn = room.turn === 'w' ? 'b' : 'w';
+    room.history.push(uci);
+    room.lastMoveTime = Date.now();
+    broadcast(roomId, { type: 'move', uci, timers: { ...room.timers }, turn: room.turn });
+  } finally {
+    room.engineThinking = false;
+  }
+}
+
 // Timer tick — broadcast remaining time every second for active games
 setInterval(() => {
   const now = Date.now();
@@ -322,6 +361,9 @@ const server = http.createServer(async (req, res) => {
     try {
       const body = JSON.parse(await readBody(req) || '{}');
       const tc = Math.max(60000, Math.min(3600000, parseInt(body.timeControl, 10) || 300000));
+      // An engine game seats Stockfish on the other side and starts right away
+      // instead of waiting for a second player to open the link.
+      const engineColor = body.opponent === 'engine' ? 'b' : null;
       const roomId = genRoomId();
       rooms.set(roomId, {
         id: roomId,
@@ -329,15 +371,22 @@ const server = http.createServer(async (req, res) => {
         turn: 'w',
         timeControl: tc,
         timers: { w: tc, b: tc },
-        lastMoveTime: null,
-        started: false,
+        lastMoveTime: engineColor ? Date.now() : null,
+        started: !!engineColor,
         finished: false,
-        players: { w: true, b: false },
+        engineColor,
+        players: { w: true, b: !!engineColor },
         history: [],
         createdAt: Date.now(),
       });
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ roomId, color: 'w', timeControl: tc }));
+      res.end(JSON.stringify({
+        roomId,
+        color: 'w',
+        timeControl: tc,
+        engine: !!engineColor,
+        started: !!engineColor,
+      }));
     } catch (e) {
       res.writeHead(500, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: String(e.message || e) }));
@@ -352,6 +401,20 @@ const server = http.createServer(async (req, res) => {
       if (!room) {
         res.writeHead(404, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: 'Room not found' }));
+        return;
+      }
+      if (room.engineColor) {
+        // An engine game has no second seat: whoever opens the link takes the
+        // human side and catches up with the moves played so far.
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          roomId: body.roomId,
+          color: room.engineColor === 'w' ? 'b' : 'w',
+          history: room.history,
+          timeControl: room.timeControl,
+          timers: { ...room.timers },
+          engine: true,
+        }));
         return;
       }
       if (room.players.b) {
@@ -414,9 +477,15 @@ const server = http.createServer(async (req, res) => {
       room.lastMoveTime = now;
       room.turn = room.turn === 'w' ? 'b' : 'w';
       room.history.push(body.uci);
+      // The position this move created exists only on the mover's board, and an
+      // engine game needs it to ask Stockfish for its reply.
+      if (room.engineColor && typeof body.fen === 'string' && !positionRejection(body.fen)) {
+        room.position = body.fen;
+      }
       broadcast(body.roomId, { type: 'move', uci: body.uci, timers: { ...room.timers }, turn: room.turn });
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ ok: true }));
+      playEngineMove(body.roomId).catch(() => {});
     } catch (e) {
       res.writeHead(500, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: String(e.message || e) }));
