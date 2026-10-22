@@ -9,12 +9,36 @@ const fs = require('fs');
 const path = require('path');
 const { spawn } = require('child_process');
 const crypto = require('crypto');
+const os = require('os');
 
 const PORT = process.env.PORT || 3000;
 const STOCKFISH = process.env.STOCKFISH_PATH || '/usr/local/bin/stockfish';
 const PUBLIC_DIR = path.join(__dirname, 'public');
-const THREADS = parseInt(process.env.STOCKFISH_THREADS, 10) || 4;
-const HASH_MB = parseInt(process.env.STOCKFISH_HASH_MB, 10) || 256;
+// The engine sizes itself to the machine it is running on. Threads follow the
+// CPUs it is given, up to the point where more of them stop helping a
+// half-second search; the hash table follows the memory, never more than the
+// container is allowed to use. Either can still be pinned with an environment
+// variable, which is what a machine with an unusual shape would need.
+const CPUS = Math.max(1, os.cpus().length || 1);
+
+// The memory the process may actually use: the container's limit when there is
+// one, otherwise the whole machine's.
+function memoryLimitMb() {
+  for (const file of ['/sys/fs/cgroup/memory.max', '/sys/fs/cgroup/memory/memory.limit_in_bytes']) {
+    try {
+      const raw = fs.readFileSync(file, 'utf8').trim();
+      if (raw === 'max') break;
+      const bytes = parseInt(raw, 10);
+      if (Number.isFinite(bytes) && bytes > 0) return Math.floor(bytes / 1048576);
+    } catch {}
+  }
+  return Math.floor(os.totalmem() / 1048576);
+}
+
+const MEMORY_MB = memoryLimitMb();
+const THREADS = parseInt(process.env.STOCKFISH_THREADS, 10) || Math.min(CPUS, 8);
+const HASH_MB = parseInt(process.env.STOCKFISH_HASH_MB, 10)
+  || Math.min(Math.max(Math.floor(MEMORY_MB / 16), 256), 2048);
 // Time budget per move (ms). Short for snappy replies; the engine still
 // searches as deep as it can (up to the requested depth) within it.
 const MOVE_TIME_MS = parseInt(process.env.STOCKFISH_MOVE_TIME_MS, 10) || 500;
@@ -509,5 +533,6 @@ const server = http.createServer(async (req, res) => {
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`Stockfish web UI listening on 0.0.0.0:${PORT}`);
   console.log(`Engine binary: ${STOCKFISH}`);
+  console.log(`Host: ${CPUS} CPUs, ${MEMORY_MB} MB memory`);
   console.log(`Threads: ${THREADS}, Hash: ${HASH_MB} MB`);
 });
