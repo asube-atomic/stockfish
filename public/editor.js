@@ -53,7 +53,9 @@ function fenFromBoard(board, turn) {
   return `${rows.join('/')} ${turn} ${castling || '-'} - 0 1`;
 }
 
-// Why the engine cannot be given this position, or null when it can.
+// Why the engine cannot be given this position, or null when it can. The limits
+// mirror the ones the engine itself enforces: it exits on a position it refuses,
+// which would take the engine down in the middle of a game.
 function positionError(fen) {
   const pos = new Chess(fen);
   const kings = pos.board.filter((p) => p && p.toUpperCase() === 'K');
@@ -65,6 +67,30 @@ function positionError(fen) {
       return 'A pawn cannot stand on the first or last rank.';
     }
   }
+
+  const pieces = pos.board.filter(Boolean);
+  if (pieces.length > 32) {
+    return `The engine refuses a position with more than 32 pieces (this one has ${pieces.length}).`;
+  }
+
+  const count = { P: 0, N: 0, B: 0, R: 0, Q: 0, p: 0, n: 0, b: 0, r: 0, q: 0 };
+  for (const piece of pieces) count[piece] += 1;
+
+  for (const side of [
+    { name: 'White', pawn: 'P', extras: ['N', 'B', 'R'], queen: 'Q' },
+    { name: 'Black', pawn: 'p', extras: ['n', 'b', 'r'], queen: 'q' },
+  ]) {
+    if (count[side.pawn] > 8) {
+      return `${side.name} cannot have more than 8 pawns.`;
+    }
+    // Each piece beyond the starting set needs a pawn to have promoted.
+    const promoted = side.extras.reduce((sum, p) => sum + Math.max(count[p] - 2, 0), 0)
+      + Math.max(count[side.queen] - 1, 0);
+    if (promoted > 8 - count[side.pawn]) {
+      return `${side.name} has too many pieces for the pawns it is missing.`;
+    }
+  }
+
   const idle = pos.turn === 'w' ? 'b' : 'w';
   if (pos.inCheck(idle)) {
     return `${idle === 'w' ? 'White' : 'Black'} is in check although it is not their move.`;

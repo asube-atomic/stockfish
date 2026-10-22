@@ -235,6 +235,43 @@ setInterval(() => {
   }
 }, 300000);
 
+// The engine exits on a position it refuses, which would take the shared engine
+// process down mid-move, so the piece-count limits it enforces are checked here
+// before any position reaches it. Returns the reason, or null when it is fine.
+function positionRejection(fen) {
+  const rows = String(fen).trim().split(/\s+/)[0].split('/');
+  if (rows.length !== 8) return 'the board must have eight ranks';
+
+  const count = {};
+  let total = 0;
+  for (const row of rows) {
+    let squares = 0;
+    for (const ch of row) {
+      if (ch >= '1' && ch <= '8') { squares += Number(ch); continue; }
+      squares += 1;
+      total += 1;
+      count[ch] = (count[ch] || 0) + 1;
+    }
+    if (squares !== 8) return 'every rank must hold eight squares';
+  }
+
+  if (total > 32) return `more than 32 pieces on the board (${total})`;
+  if ((count.K || 0) !== 1 || (count.k || 0) !== 1) return 'there must be exactly one king of each colour';
+  if (/[Pp]/.test(rows[0] + rows[7])) return 'a pawn cannot stand on the first or last rank';
+
+  for (const side of [
+    { name: 'White', pawn: 'P', extras: ['N', 'B', 'R'], queen: 'Q' },
+    { name: 'Black', pawn: 'p', extras: ['n', 'b', 'r'], queen: 'q' },
+  ]) {
+    const pawns = count[side.pawn] || 0;
+    if (pawns > 8) return `${side.name} has more than 8 pawns`;
+    const promoted = side.extras.reduce((sum, p) => sum + Math.max((count[p] || 0) - 2, 0), 0)
+      + Math.max((count[side.queen] || 0) - 1, 0);
+    if (promoted > 8 - pawns) return `${side.name} has too many pieces for the pawns it is missing`;
+  }
+  return null;
+}
+
 const server = http.createServer(async (req, res) => {
   if (req.method === 'POST' && req.url === '/api/bestmove') {
     try {
@@ -244,6 +281,12 @@ const server = http.createServer(async (req, res) => {
       if (!fen || typeof fen !== 'string') {
         res.writeHead(400, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: 'Missing fen' }));
+        return;
+      }
+      const rejected = positionRejection(fen);
+      if (rejected) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Position refused: ' + rejected }));
         return;
       }
       // Fast fixed time budget; engine searches as deep as possible (up to
