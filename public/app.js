@@ -313,8 +313,7 @@ function onPointerUp(e) {
       }
       const uci = game.moveToUci(move);
       game._make(move);
-      moveLog.push({ uci });
-      updateMoveLog();
+      recordMove(uci);
       selected = null;
       legalForSelected = [];
       pendingMove = { from: move.from, to: move.to };
@@ -350,8 +349,7 @@ function onSquareClick(idx) {
       }
       const uci = game.moveToUci(move);
       game._make(move);
-      moveLog.push({ uci });
-      updateMoveLog();
+      recordMove(uci);
       selected = null;
       legalForSelected = [];
       pendingMove = { from: move.from, to: move.to };
@@ -393,18 +391,36 @@ function updateStatus() {
   statusEl.className = 'status' + (status.startsWith('checkmate') ? ' done' : '');
 }
 
-// Entries are either a move ({ uci }) or a position edited by hand
+// Entries are either a move ({ uci, mover }) or a position edited by hand
 // ({ edit, fen }), so an edited game keeps the moves it has already played and
-// only marks the point where the board was changed. Numbering counts real
-// moves, which keeps the game's move numbers running across an edit.
+// only marks the point where the board was changed.
+
+// Record a move together with the side that played it, which the move list
+// needs to keep numbering straight across an edit.
+function recordMove(uci) {
+  const last = game.history[game.history.length - 1];
+  const mover = last && last.piece === last.piece.toUpperCase() ? 'w' : 'b';
+  moveLog.push({ uci, mover });
+  updateMoveLog();
+}
+
+// The numbers carry on across an edit: White's move gets its number, Black's
+// move is numbered too when an edit left it without a White move in front of
+// it, so the list never restarts at 1 or drops a number.
 function updateMoveLog() {
-  let ply = 0;
+  let moveNo = 1;
+  let whiteToFollow = false;
   moveLogEl.innerHTML = moveLog.map((entry) => {
     if (entry.edit) return '<span class="ply edited" title="Position edited by hand">&#9998;</span>';
-    const num = Math.floor(ply / 2) + 1;
-    const dot = ply % 2 === 0 ? `${num}.` : '';
-    ply++;
-    return `<span class="ply">${dot} ${entry.uci}</span>`;
+    if (entry.mover === 'b') {
+      const prefix = whiteToFollow ? '' : `${moveNo}... `;
+      whiteToFollow = false;
+      moveNo++;
+      return `<span class="ply">${prefix}${entry.uci}</span>`;
+    }
+    if (whiteToFollow) moveNo++;
+    whiteToFollow = true;
+    return `<span class="ply">${moveNo}. ${entry.uci}</span>`;
   }).join(' ');
   moveLogEl.scrollTop = moveLogEl.scrollHeight;
 }
@@ -525,8 +541,7 @@ async function engineMove() {
 
     if (m) {
       game._make(m);
-      moveLog.push({ uci: bestUci });
-      updateMoveLog();
+      recordMove(bestUci);
       pendingMove = { from: m.from, to: m.to };
     }
   } catch (e) {
@@ -549,8 +564,7 @@ function showPromotionDialog(fromIdx, toIdx, baseMove) {
       const m = { ...baseMove, promo };
       const uci = game.moveToUci(m);
       game._make(m);
-      moveLog.push({ uci });
-      updateMoveLog();
+      recordMove(uci);
       selected = null;
       legalForSelected = [];
       overlay.remove();
@@ -618,8 +632,7 @@ function applyOpponentMove(uci) {
   const m = game.parseUci(uci);
   if (m) {
     game._make(m);
-    moveLog.push({ uci });
-    updateMoveLog();
+    recordMove(uci);
     pendingMove = { from: m.from, to: m.to };
     render();
   }
