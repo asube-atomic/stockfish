@@ -146,6 +146,38 @@ function animateMove(fromIdx, toIdx) {
 
 // --- Drag and drop ---
 
+// Squares involved in each castle: [king from, king to, rook from, rook to]
+const CASTLE_SQUARES = {
+  K: [60, 62, 63, 61],
+  Q: [60, 58, 56, 59],
+  k: [4, 6, 7, 5],
+  q: [4, 2, 0, 3],
+};
+
+// Castling is usually played by moving the king two squares, but it is just as
+// natural to play it with the rook: drop the king on its own rook, or drag the
+// rook onto one of the two squares the castle involves. Translate that gesture
+// into the real castling move, as long as the position allows it.
+function findCastleMove(fromIdx, toIdx) {
+  if (fromIdx === null || fromIdx === toIdx) return null;
+  const dragged = game.board[fromIdx];
+  if (!dragged) return null;
+  const isKing = dragged.toUpperCase() === 'K';
+  if (!isKing && dragged.toUpperCase() !== 'R') return null;
+
+  for (const m of game.legalMoves()) {
+    if (!m.castle) continue;
+    const [kingFrom, kingTo, rookFrom, rookTo] = CASTLE_SQUARES[m.castle];
+    if (fromIdx !== (isKing ? kingFrom : rookFrom)) continue;
+    if (isKing) {
+      if (toIdx === rookFrom) return m;
+    } else if (toIdx === rookTo || toIdx === kingTo) {
+      return m;
+    }
+  }
+  return null;
+}
+
 function onSquarePointerDown(e, idx) {
   if (thinking || gameFinished() || game.turn !== humanColor) return;
   const piece = game.board[idx];
@@ -232,7 +264,9 @@ function onPointerUp(e) {
   const targetSq = target?.closest?.('.sq');
   if (targetSq) {
     const targetIdx = parseInt(targetSq.dataset.idx, 10);
-    const move = legalForSelected.find((m) => m.to === targetIdx);
+    // A castle read from the gesture wins over the rook's plain move to the
+    // same square, so dragging the rook two squares castles instead of moving.
+    const move = findCastleMove(dragFromIdx, targetIdx) || legalForSelected.find((m) => m.to === targetIdx);
     if (move) {
       if (move.promo) {
         showPromotionDialog(dragFromIdx, targetIdx, move);
@@ -270,7 +304,7 @@ function onSquareClick(idx) {
   const piece = game.board[idx];
 
   if (selected !== null) {
-    const move = legalForSelected.find((m) => m.to === idx);
+    const move = findCastleMove(selected, idx) || legalForSelected.find((m) => m.to === idx);
     if (move) {
       if (move.promo) {
         showPromotionDialog(selected, idx, move);
