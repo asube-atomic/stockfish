@@ -31,9 +31,6 @@ const editor = new PositionEditor({
 });
 
 let game = new Chess();
-// Where the current game began — the usual starting position, or the position
-// an edit left the board in. Repetition detection replays the log from here.
-let startFen = null;
 let humanColor = 'w';
 let flipped = false;
 let selected = null;
@@ -316,7 +313,7 @@ function onPointerUp(e) {
       }
       const uci = game.moveToUci(move);
       game._make(move);
-      moveLog.push(uci);
+      moveLog.push({ uci });
       updateMoveLog();
       selected = null;
       legalForSelected = [];
@@ -353,7 +350,7 @@ function onSquareClick(idx) {
       }
       const uci = game.moveToUci(move);
       game._make(move);
-      moveLog.push(uci);
+      moveLog.push({ uci });
       updateMoveLog();
       selected = null;
       legalForSelected = [];
@@ -396,11 +393,18 @@ function updateStatus() {
   statusEl.className = 'status' + (status.startsWith('checkmate') ? ' done' : '');
 }
 
+// Entries are either a move ({ uci }) or a position edited by hand
+// ({ edit, fen }), so an edited game keeps the moves it has already played and
+// only marks the point where the board was changed. Numbering counts real
+// moves, which keeps the game's move numbers running across an edit.
 function updateMoveLog() {
-  moveLogEl.innerHTML = moveLog.map((m, i) => {
-    const num = Math.floor(i / 2) + 1;
-    const dot = i % 2 === 0 ? `${num}.` : '';
-    return `<span class="ply">${dot} ${m}</span>`;
+  let ply = 0;
+  moveLogEl.innerHTML = moveLog.map((entry) => {
+    if (entry.edit) return '<span class="ply edited" title="Position edited by hand">&#9998;</span>';
+    const num = Math.floor(ply / 2) + 1;
+    const dot = ply % 2 === 0 ? `${num}.` : '';
+    ply++;
+    return `<span class="ply">${dot} ${entry.uci}</span>`;
   }).join(' ');
   moveLogEl.scrollTop = moveLogEl.scrollHeight;
 }
@@ -415,10 +419,18 @@ function posKey(fen) {
 // it for every candidate move.
 function seenPositions() {
   const seen = new Set();
-  const temp = new Chess(startFen);
+  let temp = new Chess();
   seen.add(posKey(temp.fen()));
-  for (const uci of moveLog) {
-    const m = temp.parseUci(uci);
+  for (const entry of moveLog) {
+    if (entry.edit) {
+      // An edit replaced the line played so far, so only the positions reached
+      // since then are still on this game's path.
+      temp = new Chess(entry.fen);
+      seen.clear();
+      seen.add(posKey(temp.fen()));
+      continue;
+    }
+    const m = temp.parseUci(entry.uci);
     if (!m) break;
     temp._make(m);
     seen.add(posKey(temp.fen()));
@@ -513,7 +525,7 @@ async function engineMove() {
 
     if (m) {
       game._make(m);
-      moveLog.push(bestUci);
+      moveLog.push({ uci: bestUci });
       updateMoveLog();
       pendingMove = { from: m.from, to: m.to };
     }
@@ -537,7 +549,7 @@ function showPromotionDialog(fromIdx, toIdx, baseMove) {
       const m = { ...baseMove, promo };
       const uci = game.moveToUci(m);
       game._make(m);
-      moveLog.push(uci);
+      moveLog.push({ uci });
       updateMoveLog();
       selected = null;
       legalForSelected = [];
@@ -566,9 +578,12 @@ function undoMove() {
   if (thinking || game.history.length === 0) return;
   // Undo two half-moves (engine reply + your move) so it's your turn again.
   // If only one half-move exists (e.g. playing black), undo just that one.
+  // A hand-edited position is a wall: the moves played before it are no longer
+  // part of this game's history, so undo stops at the edit instead of wiping
+  // the game's record.
   const undoCount = Math.min(2, game.history.length);
   for (let i = 0; i < undoCount; i++) game._unmake();
-  moveLog.splice(-undoCount);
+  for (let i = 0; i < undoCount; i++) moveLog.pop();
   selected = null;
   legalForSelected = [];
   pendingMove = null;
@@ -603,7 +618,7 @@ function applyOpponentMove(uci) {
   const m = game.parseUci(uci);
   if (m) {
     game._make(m);
-    moveLog.push(uci);
+    moveLog.push({ uci });
     updateMoveLog();
     pendingMove = { from: m.from, to: m.to };
     render();
@@ -747,18 +762,24 @@ function closeOnlineModal() {
   }
 }
 
-// Resume play from the position the editor handed over.
+// Resume play from the position the editor handed over. The game carries on as
+// the same game: the moves it has already played stay in the list, the edit is
+// marked there, the move counter keeps running, and the engine continues from
+// this position instead of being reset for a fresh game.
 function playEditedPosition(fen) {
-  startFen = fen;
-  game = new Chess(fen);
+  // Carry the game's move number over to the edited position.
+  const parts = fen.split(' ');
+  parts[5] = String(Math.floor(moveLog.filter((e) => !e.edit).length / 2) + 1);
+  const continued = parts.join(' ');
+
+  game = new Chess(continued);
+  moveLog.push({ edit: true, fen: continued });
   selected = null;
   legalForSelected = [];
   thinking = false;
-  moveLog = [];
   pendingMove = null;
   lastMove = null;
   updateMoveLog();
-  fetch('/api/newgame', { method: 'POST' }).catch(() => {});
   render();
   // An edit can leave the engine on move; in that case it moves right away.
   if (game.turn !== humanColor) engineMove();
@@ -767,7 +788,6 @@ function playEditedPosition(fen) {
 function newGame() {
   if (editor.active) editor.exit();
   editPositionBtn.disabled = false;
-  startFen = null;
   if (isOnline && onlineGame) {
     onlineGame.leave();
     onlineGame = null;

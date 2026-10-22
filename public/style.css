@@ -234,6 +234,12 @@ button:hover { background: #4a4a4a; }
 
 .ply { margin-right: 6px; color: var(--text); }
 
+/* Marks where the board was edited by hand, so the move list stays truthful */
+.ply.edited {
+  color: var(--accent-light);
+  cursor: help;
+}
+
 .promo-overlay {
   position: fixed;
   top: 0; left: 0; right: 0; bottom: 0;
