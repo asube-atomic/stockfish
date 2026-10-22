@@ -776,9 +776,10 @@ function closeOnlineModal() {
 }
 
 // Resume play from the position the editor handed over. The game carries on as
-// the same game: the moves it has already played stay in the list, the edit is
-// marked there, the move counter keeps running, and the engine continues from
-// this position instead of being reset for a fresh game.
+// the same game — its moves stay in the list, the edit is marked there and the
+// move counter keeps running — while the engine is put back into the same fresh
+// state a new game starts from, so an edit can never leave it searching from the
+// line that was edited away and its strength is unchanged.
 function playEditedPosition(fen) {
   // Carry the game's move number over to the edited position.
   const parts = fen.split(' ');
@@ -793,6 +794,9 @@ function playEditedPosition(fen) {
   pendingMove = null;
   lastMove = null;
   updateMoveLog();
+  // Same engine reset a new game performs, so an edit changes neither the
+  // engine's settings nor the state it searches from.
+  fetch('/api/newgame', { method: 'POST' }).catch(() => {});
   render();
   // An edit can leave the engine on move; in that case it moves right away.
   if (game.turn !== humanColor) engineMove();
