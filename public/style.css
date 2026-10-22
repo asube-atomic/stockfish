@@ -327,6 +327,14 @@ button:hover { background: #4a4a4a; }
   margin-top: 8px;
 }
 
+.preview-note {
+  color: #e0a33c;
+  font-size: 0.85rem;
+  line-height: 1.35;
+  text-align: center;
+  margin: 4px 0 0;
+}
+
 .modal .error {
   color: #e74c3c;
 }

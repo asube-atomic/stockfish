@@ -583,6 +583,16 @@ function startOnlineGame(data) {
   render();
 }
 
+// Challenge links are built from the address the app is served on. A preview
+// address is temporary: it only answers while that preview is running and it
+// changes when the environment is recreated, so a link copied from it stops
+// working for the opponent. Only a permanently hosted address shares safely.
+function isTemporaryHost() {
+  return /(^|\.)base44-preview\.app$/i.test(location.hostname)
+    || location.hostname === 'localhost'
+    || location.hostname === '127.0.0.1';
+}
+
 function showCreateChallenge() {
   onlineModalContent.innerHTML = `
     <div class="online-form">
@@ -618,6 +628,7 @@ async function createChallenge() {
         <input type="text" id="challenge-link" readonly value="${link}">
         <button id="copy-link-btn" type="button">Copy</button>
       </div>
+      ${isTemporaryHost() ? '<p class="preview-note">This is a temporary preview address: the link stops working when the preview stops, restarts or moves, so your opponent cannot rely on it. Host the app at a permanent address to invite people with links that keep working.</p>' : ''}
       <p class="waiting">Waiting for opponent to join...</p>
     `;
     document.getElementById('copy-link-btn').addEventListener('click', () => {
